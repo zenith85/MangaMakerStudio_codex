@@ -24,6 +24,7 @@ import {
 } from "./store.js";
 import { generateImageViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt } from "./prompt.js";
+import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
@@ -140,10 +141,10 @@ app.post("/api/projects/:projectId/pages", (req, res) => {
     panels: Array.from({ length: panelCount }, (_, i) => ({
       id: nanoid(8),
       order: i,
-      characterIds: [],
-      placeId: null,
-      objectIds: [],
-      sceneDescription: "",
+      // Rich-text scene description (Tiptap doc) with inline #mentions of
+      // characters/places/objects — this is the sole source of a panel's cast and
+      // setting; see scene.js for how mentions are extracted at generation time.
+      sceneDoc: EMPTY_SCENE_DOC,
       imageAssetId: null, // nanoid; served from /uploads (page-panel renders, separate from entity reference images)
     })),
     createdAt: Date.now(),
@@ -202,23 +203,24 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
-    Object.assign(panel, req.body); // characterIds, placeId, objectIds, sceneDescription, backend
+    Object.assign(panel, req.body); // sceneDoc
     savePages(projectId, pages);
 
-    const characters = (panel.characterIds || []).map((id) => getEntity(projectId, "characters", id)).filter(Boolean);
-    const place = panel.placeId ? getEntity(projectId, "places", panel.placeId) : null;
-    const objects = (panel.objectIds || []).map((id) => getEntity(projectId, "objects", id)).filter(Boolean);
+    const { plainText, characterIds, placeIds, objectIds } = parseSceneDoc(panel.sceneDoc);
+    const characters = characterIds.map((id) => getEntity(projectId, "characters", id)).filter(Boolean);
+    const places = placeIds.map((id) => getEntity(projectId, "places", id)).filter(Boolean);
+    const objects = objectIds.map((id) => getEntity(projectId, "objects", id)).filter(Boolean);
 
     const referenceImages = [
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
-      ...(place ? [loadEntityImage(projectId, "places", place.id)].filter(Boolean) : []),
+      ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
     ];
 
     const prompt = buildPrompt({
-      sceneDescription: panel.sceneDescription,
+      sceneDescription: plainText,
       characters,
-      place,
+      places,
       objects,
       stylePreset: page.stylePreset,
     });

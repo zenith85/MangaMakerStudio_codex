@@ -161,8 +161,42 @@ export function entityImageUrl(projectId, kind, entityId) {
 
 // ---------- Pages: ProjectName/pages.json ----------
 
+// Panels used to store characterIds/placeId/objectIds arrays plus a separate plain
+// sceneDescription string. That's replaced by a single sceneDoc (rich text with
+// inline #mentions — see scene.js). Migrate any panel still in the old shape by
+// folding its selections into an equivalent doc, so existing pages keep their cast.
+function migratePanel(projectId, panel) {
+  if (panel.sceneDoc) return panel;
+
+  const content = [];
+  if (panel.sceneDescription?.trim()) content.push({ type: "text", text: panel.sceneDescription.trim() + " " });
+
+  const mentionsFor = (kind, ids) => {
+    for (const id of ids ?? []) {
+      const entity = getEntity(projectId, kind, id);
+      if (entity) content.push({ type: "mention", attrs: { id: `${kind}:${id}`, label: entity.name } }, { type: "text", text: " " });
+    }
+  };
+  mentionsFor("characters", panel.characterIds);
+  mentionsFor("places", panel.placeId ? [panel.placeId] : []);
+  mentionsFor("objects", panel.objectIds);
+
+  const { characterIds, placeId, objectIds, sceneDescription, ...rest } = panel;
+  return { ...rest, sceneDoc: { type: "doc", content: [{ type: "paragraph", content }] } };
+}
+
 export function listPages(projectId) {
-  return readJSON(path.join(projectDir(projectId), "pages.json")) || [];
+  const pages = readJSON(path.join(projectDir(projectId), "pages.json")) || [];
+  let migrated = false;
+  for (const page of pages) {
+    page.panels = page.panels.map((panel) => {
+      if (panel.sceneDoc) return panel;
+      migrated = true;
+      return migratePanel(projectId, panel);
+    });
+  }
+  if (migrated) savePages(projectId, pages);
+  return pages;
 }
 export function savePages(projectId, pages) {
   writeJSON(path.join(projectDir(projectId), "pages.json"), pages);

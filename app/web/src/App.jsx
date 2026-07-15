@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "./api";
 import Terminal from "./Terminal";
+import SceneEditor from "./SceneEditor";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
 // in order, so a layout's look comes entirely from its grid-template — no
@@ -174,7 +175,7 @@ export default function App() {
       projectId={currentProjectId}
       onToggle={() => setShowTerminal((v) => !v)}
       leftInset={280} // .sidebar width
-      rightInset={selectedPanel ? 340 : 0} // .panel-editor width, only when it's open
+      rightInset={selectedPanel ? 460 : 0} // .panel-editor width, only when it's open
     />
   );
 
@@ -622,25 +623,15 @@ function PageCanvas({ page, selectedPanelId, onSelect }) {
 }
 
 function PanelEditor({ projectId, page, panel, characters, places, objects, onClose, onUpdated }) {
-  const [characterIds, setCharacterIds] = useState(panel.characterIds || []);
-  const [placeId, setPlaceId] = useState(panel.placeId || "");
-  const [objectIds, setObjectIds] = useState(panel.objectIds || []);
-  const [sceneDescription, setSceneDescription] = useState(panel.sceneDescription || "");
+  const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
-  const toggle = (list, setList, id) => setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
   const generate = async () => {
     setBusy(true);
     setError("");
     try {
-      await api.generatePanel(projectId, page.id, panel.id, {
-        characterIds,
-        placeId: placeId || null,
-        objectIds,
-        sceneDescription,
-      });
+      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc });
       await onUpdated();
     } catch (err) {
       setError(err.message);
@@ -656,59 +647,16 @@ function PanelEditor({ projectId, page, panel, characters, places, objects, onCl
         <button onClick={onClose}>Close</button>
       </div>
 
-      <section>
-        <h4>Characters</h4>
-        <div className="checkbox-grid">
-          {characters.map((c) => (
-            <label key={c.id}>
-              <input
-                type="checkbox"
-                checked={characterIds.includes(c.id)}
-                onChange={() => toggle(characterIds, setCharacterIds, c.id)}
-              />
-              {c.name}
-            </label>
-          ))}
-          {characters.length === 0 && <p className="empty-hint">Add characters in the sidebar first.</p>}
-        </div>
-      </section>
-
-      <section>
-        <h4>Place</h4>
-        <select value={placeId} onChange={(e) => setPlaceId(e.target.value)}>
-          <option value="">None</option>
-          {places.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </section>
-
-      <section>
-        <h4>Objects</h4>
-        <div className="checkbox-grid">
-          {objects.map((o) => (
-            <label key={o.id}>
-              <input
-                type="checkbox"
-                checked={objectIds.includes(o.id)}
-                onChange={() => toggle(objectIds, setObjectIds, o.id)}
-              />
-              {o.name}
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section>
+      <section className="scene-editor-section">
         <h4>Scene description</h4>
-        <textarea
-          rows={4}
-          value={sceneDescription}
-          onChange={(e) => setSceneDescription(e.target.value)}
-          placeholder="What's happening in this panel?"
-        />
+        <p className="scene-editor-hint">
+          Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
+          highlighted, and its reference image will be used when generating this panel.
+        </p>
+        <SceneEditor content={sceneDoc} onChange={setSceneDoc} characters={characters} places={places} objects={objects} />
+        {characters.length === 0 && places.length === 0 && objects.length === 0 && (
+          <p className="empty-hint">Add characters, places, or objects in the sidebar first.</p>
+        )}
       </section>
 
       {error && <p className="error">{error}</p>}

@@ -12,7 +12,7 @@ function describeFields(fields) {
     .join(", ");
 }
 
-export function buildPrompt({ sceneDescription, characters, place, objects, stylePreset }) {
+export function buildPrompt({ sceneDescription, characters, places, objects, stylePreset }) {
   const parts = [sceneDescription?.trim() || "A manga panel."];
 
   if (characters.length) {
@@ -27,10 +27,16 @@ export function buildPrompt({ sceneDescription, characters, place, objects, styl
         ". Match each character's appearance exactly to their attached reference images."
     );
   }
-  if (place) {
-    const details = describeFields(place.fields);
+  if (places.length) {
     parts.push(
-      `Setting: ${place.name}${details ? ` (${details})` : ""}, matching its attached reference image.`
+      "Setting: " +
+        places
+          .map((p) => {
+            const details = describeFields(p.fields);
+            return details ? `${p.name} (${details})` : p.name;
+          })
+          .join(", ") +
+        ", matching the attached reference image(s)."
     );
   }
   if (objects.length) {
