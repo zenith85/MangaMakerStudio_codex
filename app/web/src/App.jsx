@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
@@ -144,6 +144,19 @@ export default function App() {
     if (currentPage) setCurrentPage(await api.getPage(currentProjectId, currentPage.id));
   };
 
+  // Live drag feedback (no network call) — see PanelThumb's pointermove handler.
+  const dragPanelImage = (panelId, imageOffset) => {
+    setCurrentPage((page) => ({
+      ...page,
+      panels: page.panels.map((p) => (p.id === panelId ? { ...p, imageOffset } : p)),
+    }));
+  };
+
+  // Persist the final position once the drag ends.
+  const commitPanelImage = (panelId, imageOffset) => {
+    api.updatePanel(currentProjectId, currentPage.id, panelId, { imageOffset });
+  };
+
   const createPage = async ({ title, layout, stylePreset }) => {
     const panelCount = LAYOUTS.find((l) => l.value === layout)?.panelCount ?? 4;
     const page = await api.createPage(currentProjectId, { title, layout, stylePreset, panelCount });
@@ -231,7 +244,13 @@ export default function App() {
           onCreate={createPage}
         />
         {currentPage ? (
-          <PageCanvas page={currentPage} selectedPanelId={selectedPanelId} onSelect={setSelectedPanelId} />
+          <PageCanvas
+            page={currentPage}
+            selectedPanelId={selectedPanelId}
+            onSelect={setSelectedPanelId}
+            onDragImage={dragPanelImage}
+            onDragImageEnd={commitPanelImage}
+          />
         ) : (
           <p className="empty-hint">Create a page to get started.</p>
         )}
@@ -592,7 +611,7 @@ function LayoutPicker({ value, onChange }) {
   );
 }
 
-function PageCanvas({ page, selectedPanelId, onSelect }) {
+function PageCanvas({ page, selectedPanelId, onSelect, onDragImage, onDragImageEnd }) {
   const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
 
   return (
@@ -605,19 +624,104 @@ function PageCanvas({ page, selectedPanelId, onSelect }) {
       }}
     >
       {page.panels.map((panel, i) => (
-        <button
+        <PanelThumb
           key={panel.id}
-          className={`panel-slot ${panel.id === selectedPanelId ? "selected" : ""}`}
-          style={{ gridArea: `p${i + 1}` }}
-          onClick={() => onSelect(panel.id)}
-        >
-          {panel.imageAssetId ? (
-            <img src={`/uploads/${panel.imageAssetId}.png`} alt="" />
-          ) : (
-            <span className="placeholder">Click to set up panel {panel.order + 1}</span>
-          )}
-        </button>
+          panel={panel}
+          selected={panel.id === selectedPanelId}
+          gridArea={`p${i + 1}`}
+          onSelect={onSelect}
+          onDragImage={onDragImage}
+          onDragImageEnd={onDragImageEnd}
+        />
       ))}
+    </div>
+  );
+}
+
+const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+
+// A panel's generated image is rendered with object-fit: cover, so a wider-than-tall
+// (or taller-than-wide) image gets cropped to fill the frame. Holding and dragging the
+// image pans that crop by adjusting object-position — this tracks the drag in pixels,
+// converts it to a percentage of how far the rendered image overflows the frame in each
+// axis, and only treats it as a "select this panel" click if the pointer never moved.
+function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragImageEnd }) {
+  const imgRef = useRef(null);
+  const containerRef = useRef(null);
+  const dragRef = useRef(null);
+
+  const offset = panel.imageOffset || { x: 50, y: 50 };
+
+  const onPointerDown = (e) => {
+    if (!panel.imageAssetId || e.button !== 0) return;
+    const img = imgRef.current;
+    const container = containerRef.current;
+    if (!img || !container || !img.naturalWidth) return;
+    e.preventDefault();
+
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const naturalRatio = img.naturalWidth / img.naturalHeight;
+    const containerRatio = cw / ch;
+    const renderedW = naturalRatio > containerRatio ? ch * naturalRatio : cw;
+    const renderedH = naturalRatio > containerRatio ? ch : cw / naturalRatio;
+
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startOffset: offset,
+      overflowX: Math.max(0, renderedW - cw),
+      overflowY: Math.max(0, renderedH - ch),
+      moved: false,
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  };
+
+  const onPointerMove = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+    d.moved = true;
+
+    const nx = d.overflowX > 0 ? clamp(d.startOffset.x - (dx / d.overflowX) * 100, 0, 100) : 50;
+    const ny = d.overflowY > 0 ? clamp(d.startOffset.y - (dy / d.overflowY) * 100, 0, 100) : 50;
+    d.lastOffset = { x: nx, y: ny };
+    onDragImage(panel.id, d.lastOffset);
+  };
+
+  const onPointerUp = () => {
+    const d = dragRef.current;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    dragRef.current = null;
+    if (!d) return;
+    if (d.moved) onDragImageEnd(panel.id, d.lastOffset);
+    else onSelect(panel.id);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={`panel-slot ${selected ? "selected" : ""} ${panel.imageAssetId ? "has-image" : ""}`}
+      style={{ gridArea }}
+      onPointerDown={onPointerDown}
+    >
+      {panel.imageAssetId ? (
+        <img
+          ref={imgRef}
+          src={`/uploads/${panel.imageAssetId}.png`}
+          alt=""
+          draggable={false}
+          style={{ objectPosition: `${offset.x}% ${offset.y}%` }}
+        />
+      ) : (
+        <span className="placeholder" onClick={() => onSelect(panel.id)}>
+          Click to set up panel {panel.order + 1}
+        </span>
+      )}
     </div>
   );
 }
