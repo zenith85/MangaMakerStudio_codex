@@ -31,9 +31,13 @@ export const api = {
   listPages: (projectId) => req(`/projects/${projectId}/pages`),
   createPage: (projectId, body) => req(`/projects/${projectId}/pages`, { method: "POST", ...json(body) }),
   getPage: (projectId, id) => req(`/projects/${projectId}/pages/${id}`),
+  updatePage: (projectId, pageId, body) =>
+    req(`/projects/${projectId}/pages/${pageId}`, { method: "PATCH", ...json(body) }),
 
   updatePanel: (projectId, pageId, panelId, body) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "PATCH", ...json(body) }),
+  deletePanel: (projectId, pageId, panelId) =>
+    req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "DELETE" }),
   generatePanel: (projectId, pageId, panelId, body) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/generate`, { method: "POST", ...json(body) }),
 };

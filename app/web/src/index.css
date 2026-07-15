@@ -281,6 +281,20 @@ textarea {
   gap: 10px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+  position: relative;
+}
+
+.layout-picker-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  z-index: 20;
+  background: #1c1d24;
+  border: 1px solid #34353f;
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
 .new-page-form {
@@ -415,6 +429,16 @@ button {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+.panel-editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.panel-editor-header-actions .delete-panel {
+  color: #ff6b6b;
 }
 
 .panel-editor-header button {

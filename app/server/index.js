@@ -196,6 +196,62 @@ function loadPanelImage(id) {
 function panelImageUrl(id) {
   return `/uploads/${id}.png`;
 }
+function deletePanelAsset(panel) {
+  if (!panel.imageAssetId) return;
+  const p = path.join(UPLOAD_DIR, `${panel.imageAssetId}.png`);
+  if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+// Keeps "Panel N" labels sequential and gap-free after a panel is removed or a
+// layout change adds/drops panels — position in the array is what actually
+// drives grid placement (see PageCanvas), this is just the display label.
+function reindexPanelOrder(panels) {
+  panels.forEach((p, i) => {
+    p.order = i;
+  });
+}
+
+// ---------- Panel deletion & layout changes ----------
+
+app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) => {
+  const { projectId, pageId, panelId } = req.params;
+  const { pages, page, panel } = findPanel(projectId, pageId, panelId);
+  if (!panel) return res.status(404).json({ error: "panel not found" });
+
+  deletePanelAsset(panel);
+  page.panels = page.panels.filter((p) => p.id !== panelId);
+  reindexPanelOrder(page.panels);
+  savePages(projectId, pages);
+  res.json(page);
+});
+
+// Changes a page's layout. `panelCount` comes from the frontend's chosen layout
+// template, same as page creation. Growing appends empty panels; shrinking drops
+// panels from the end (and their generated images) — the frontend is expected to
+// warn the user before sending a panelCount smaller than the page's current count.
+app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
+  const { projectId, pageId } = req.params;
+  const pages = listPages(projectId);
+  const page = pages.find((p) => p.id === pageId);
+  if (!page) return res.status(404).json({ error: "page not found" });
+
+  const { layout, panelCount } = req.body;
+  if (layout) page.layout = layout;
+  if (panelCount != null && panelCount !== page.panels.length) {
+    if (panelCount < page.panels.length) {
+      for (const removed of page.panels.slice(panelCount)) deletePanelAsset(removed);
+      page.panels = page.panels.slice(0, panelCount);
+    } else {
+      const toAdd = panelCount - page.panels.length;
+      for (let i = 0; i < toAdd; i++) {
+        page.panels.push({ id: nanoid(8), order: 0, sceneDoc: EMPTY_SCENE_DOC, imageAssetId: null });
+      }
+    }
+    reindexPanelOrder(page.panels);
+  }
+
+  savePages(projectId, pages);
+  res.json(page);
+});
 
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", async (req, res) => {
   try {

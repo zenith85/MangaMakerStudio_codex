@@ -94,6 +94,19 @@ const ENTITY_KINDS = [
   { value: "objects", label: "Objects", singular: "object" },
 ];
 
+// True if a panel has a generated image or any non-empty scene text/mention — used to
+// warn before a layout change would drop it (see changeLayout in App()).
+function panelHasContent(panel) {
+  if (panel.imageAssetId) return true;
+  const hasNodeContent = (node) => {
+    if (!node) return false;
+    if (node.type === "mention") return true;
+    if (node.type === "text") return !!node.text?.trim();
+    return (node.content || []).some(hasNodeContent);
+  };
+  return hasNodeContent(panel.sceneDoc);
+}
+
 export default function App() {
   const [projects, setProjects] = useState(null); // null = not loaded yet
   const [currentProjectId, setCurrentProjectId] = useState(null);
@@ -162,6 +175,39 @@ export default function App() {
     const page = await api.createPage(currentProjectId, { title, layout, stylePreset, panelCount });
     await refreshPages(currentProjectId);
     setCurrentPage(page);
+  };
+
+  // Switching to a layout with fewer panels drops the trailing ones (grid position
+  // comes from array order — see PageCanvas), so warn first if any would be lost.
+  const changeLayout = async (layoutValue) => {
+    const panelCount = LAYOUTS.find((l) => l.value === layoutValue)?.panelCount ?? 4;
+    const dropped = currentPage.panels.slice(panelCount);
+    if (dropped.length > 0) {
+      const withContent = dropped.filter(panelHasContent).length;
+      const detail =
+        withContent > 0
+          ? `, including ${withContent} with a generated image or scene text`
+          : " (all empty)";
+      const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+      if (
+        !window.confirm(
+          `This layout has ${plural(panelCount, "panel")} — the last ${plural(dropped.length, "panel")}${detail} will be removed. Continue?`
+        )
+      ) {
+        return;
+      }
+    }
+    const updated = await api.updatePage(currentProjectId, currentPage.id, { layout: layoutValue, panelCount });
+    setCurrentPage(updated);
+    await refreshPages(currentProjectId);
+    if (selectedPanelId && !updated.panels.some((p) => p.id === selectedPanelId)) setSelectedPanelId(null);
+  };
+
+  const deletePanel = async (panelId) => {
+    if (!window.confirm("Delete this panel? This can't be undone.")) return;
+    const updated = await api.deletePanel(currentProjectId, currentPage.id, panelId);
+    setCurrentPage(updated);
+    setSelectedPanelId(null);
   };
 
   const selectedPanel = currentPage?.panels.find((p) => p.id === selectedPanelId) || null;
@@ -239,9 +285,10 @@ export default function App() {
       <main className="main">
         <PageBar
           pages={pages}
-          currentPageId={currentPage?.id}
+          currentPage={currentPage}
           onOpen={openPage}
           onCreate={createPage}
+          onChangeLayout={changeLayout}
         />
         {currentPage ? (
           <PageCanvas
@@ -267,6 +314,7 @@ export default function App() {
           objects={entities.objects}
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
+          onDelete={deletePanel}
         />
       )}
 
@@ -537,8 +585,9 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   );
 }
 
-function PageBar({ pages, currentPageId, onOpen, onCreate }) {
+function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout }) {
   const [showForm, setShowForm] = useState(false);
+  const [showLayoutPicker, setShowLayoutPicker] = useState(false);
   const [title, setTitle] = useState("");
   const [layout, setLayout] = useState("grid-2x2");
   const [stylePreset, setStylePreset] = useState("manga_bw");
@@ -550,9 +599,14 @@ function PageBar({ pages, currentPageId, onOpen, onCreate }) {
     setShowForm(false);
   };
 
+  const pickLayout = (value) => {
+    onChangeLayout(value);
+    setShowLayoutPicker(false);
+  };
+
   return (
     <div className="page-bar">
-      <select value={currentPageId || ""} onChange={(e) => onOpen(e.target.value)}>
+      <select value={currentPage?.id || ""} onChange={(e) => onOpen(e.target.value)}>
         <option value="" disabled>
           Select a page…
         </option>
@@ -563,6 +617,9 @@ function PageBar({ pages, currentPageId, onOpen, onCreate }) {
         ))}
       </select>
       <button onClick={() => setShowForm((v) => !v)}>+ New page</button>
+      {currentPage && (
+        <button onClick={() => setShowLayoutPicker((v) => !v)}>Change layout</button>
+      )}
 
       {showForm && (
         <form className="new-page-form" onSubmit={submit}>
@@ -577,6 +634,12 @@ function PageBar({ pages, currentPageId, onOpen, onCreate }) {
           </select>
           <button type="submit">Create</button>
         </form>
+      )}
+
+      {showLayoutPicker && currentPage && (
+        <div className="layout-picker-popover">
+          <LayoutPicker value={currentPage.layout} onChange={pickLayout} />
+        </div>
       )}
     </div>
   );
@@ -726,7 +789,7 @@ function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragIm
   );
 }
 
-function PanelEditor({ projectId, page, panel, characters, places, objects, onClose, onUpdated }) {
+function PanelEditor({ projectId, page, panel, characters, places, objects, onClose, onUpdated, onDelete }) {
   const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -748,7 +811,12 @@ function PanelEditor({ projectId, page, panel, characters, places, objects, onCl
     <div className="panel-editor">
       <div className="panel-editor-header">
         <h3>Panel {panel.order + 1}</h3>
-        <button onClick={onClose}>Close</button>
+        <div className="panel-editor-header-actions">
+          <button className="delete-panel" onClick={() => onDelete(panel.id)}>
+            Delete panel
+          </button>
+          <button onClick={onClose}>Close</button>
+        </div>
       </div>
 
       <section className="scene-editor-section">
