@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+app/web/dist/
+
+# User-generated content (characters/places/objects, images) — kept local only,
+# grows large, and isn't something we want in version control.
+app/server/projects/
+
+# Legacy/generated panel renders (pre-dates the projects/ folder structure)
+app/server/uploads/
+
+# Old JSON-blob data store from before the folder-based rework — unused, and
+# contains a stale API key that should never be committed.
+app/server/data.json
+app/server/data.json.old-backup
+app/server/settings.json
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS cruft
+.DS_Store
+*.swp

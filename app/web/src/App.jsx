@@ -1,0 +1,615 @@
+import { useEffect, useState, useCallback } from "react";
+import { api } from "./api";
+import Terminal from "./Terminal";
+
+const LAYOUTS = [
+  { value: "single", label: "Single panel" },
+  { value: "grid_1x3", label: "3 panels (vertical)" },
+  { value: "grid_2x2", label: "4 panels (grid)" },
+];
+
+const STYLE_PRESETS = [
+  { value: "manga_bw", label: "Manga (B&W)" },
+  { value: "manhwa_color", label: "Manhwa (color)" },
+  { value: "novel_illustration", label: "Novel illustration" },
+];
+
+const ENTITY_KINDS = [
+  { value: "characters", label: "Characters", singular: "character" },
+  { value: "places", label: "Places", singular: "place" },
+  { value: "objects", label: "Objects", singular: "object" },
+];
+
+export default function App() {
+  const [projects, setProjects] = useState(null); // null = not loaded yet
+  const [currentProjectId, setCurrentProjectId] = useState(null);
+  const [kind, setKind] = useState("characters");
+  const [entities, setEntities] = useState({ characters: [], places: [], objects: [] });
+  const [editingEntity, setEditingEntity] = useState(null); // { kind, entity } | { kind, entity: null } for "new"
+  const [pages, setPages] = useState([]);
+  const [currentPage, setCurrentPage] = useState(null);
+  const [selectedPanelId, setSelectedPanelId] = useState(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+
+  const refreshProjects = useCallback(() => api.listProjects().then(setProjects), []);
+
+  const refreshEntities = useCallback((projectId) => {
+    for (const k of ["characters", "places", "objects"]) {
+      api.listEntities(projectId, k).then((list) => setEntities((prev) => ({ ...prev, [k]: list })));
+    }
+  }, []);
+
+  const refreshPages = useCallback((projectId) => api.listPages(projectId).then(setPages), []);
+
+  useEffect(() => {
+    refreshProjects();
+  }, [refreshProjects]);
+
+  const openProject = (id) => {
+    setCurrentProjectId(id);
+    setCurrentPage(null);
+    setSelectedPanelId(null);
+    setShowTerminal(true); // auto-open, cwd'd into this project's folder
+    refreshEntities(id);
+    refreshPages(id);
+  };
+
+  const createProject = async (name) => {
+    const project = await api.createProject(name);
+    await refreshProjects();
+    openProject(project.id);
+  };
+
+  const openPage = async (id) => {
+    const page = await api.getPage(currentProjectId, id);
+    setCurrentPage(page);
+    setSelectedPanelId(null);
+  };
+
+  const refreshCurrentPage = async () => {
+    if (currentPage) setCurrentPage(await api.getPage(currentProjectId, currentPage.id));
+  };
+
+  const createPage = async ({ title, layout, stylePreset }) => {
+    const page = await api.createPage(currentProjectId, { title, layout, stylePreset });
+    await refreshPages(currentProjectId);
+    setCurrentPage(page);
+  };
+
+  const selectedPanel = currentPage?.panels.find((p) => p.id === selectedPanelId) || null;
+
+  // ---------- Landing: no project open yet ----------
+  if (!currentProjectId) {
+    return (
+      <>
+        <ProjectLanding projects={projects} onOpen={openProject} onCreate={createProject} />
+        <TerminalOverlay
+          show={showTerminal}
+          projectId={currentProjectId}
+          onToggle={() => setShowTerminal((v) => !v)}
+        />
+      </>
+    );
+  }
+
+  // Inside a project, the terminal must occupy only the center column — never
+  // overlapping the sidebar or the panel editor, which are genuinely separate regions.
+  const terminalToggle = (
+    <TerminalOverlay
+      show={showTerminal}
+      projectId={currentProjectId}
+      onToggle={() => setShowTerminal((v) => !v)}
+      leftInset={280} // .sidebar width
+      rightInset={selectedPanel ? 340 : 0} // .panel-editor width, only when it's open
+    />
+  );
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <button className="back-link" onClick={() => setCurrentProjectId(null)}>
+            ← Projects
+          </button>
+        </div>
+
+        <div className="tabs">
+          {ENTITY_KINDS.map((k) => (
+            <button key={k.value} className={k.value === kind ? "active" : ""} onClick={() => setKind(k.value)}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          className="primary add-entity-button"
+          onClick={() => setEditingEntity({ kind, entity: null })}
+        >
+          + Add new {ENTITY_KINDS.find((k) => k.value === kind).singular}
+        </button>
+
+        <div className="asset-grid">
+          {entities[kind].map((entity) => (
+            <button
+              className="asset-card"
+              key={entity.id}
+              onClick={() => setEditingEntity({ kind, entity })}
+            >
+              {entity.imageUrl ? (
+                <img src={entity.imageUrl} alt={entity.name} />
+              ) : (
+                <div className="asset-card-placeholder">No image</div>
+              )}
+              <span>{entity.name}</span>
+            </button>
+          ))}
+          {entities[kind].length === 0 && <p className="empty-hint">No {kind} yet.</p>}
+        </div>
+      </aside>
+
+      <main className="main">
+        <PageBar
+          pages={pages}
+          currentPageId={currentPage?.id}
+          onOpen={openPage}
+          onCreate={createPage}
+        />
+        {currentPage ? (
+          <PageCanvas page={currentPage} selectedPanelId={selectedPanelId} onSelect={setSelectedPanelId} />
+        ) : (
+          <p className="empty-hint">Create a page to get started.</p>
+        )}
+      </main>
+
+      {selectedPanel && (
+        <PanelEditor
+          key={selectedPanel.id}
+          projectId={currentProjectId}
+          page={currentPage}
+          panel={selectedPanel}
+          characters={entities.characters}
+          places={entities.places}
+          objects={entities.objects}
+          onClose={() => setSelectedPanelId(null)}
+          onUpdated={refreshCurrentPage}
+        />
+      )}
+
+      {editingEntity && (
+        <EntityCreatorModal
+          projectId={currentProjectId}
+          kind={editingEntity.kind}
+          entity={editingEntity.entity}
+          onClose={() => setEditingEntity(null)}
+          onSaved={() => refreshEntities(currentProjectId)}
+        />
+      )}
+
+      {terminalToggle}
+    </div>
+  );
+}
+
+// Floating toggle + docked panel for the embedded terminal (see Terminal.jsx). The
+// underlying shell session lives server-side per project — closing this panel just
+// detaches the viewer (Generate can still write into it); reopening reattaches to the
+// same running session. `key={projectId}` forces a fresh viewer connection when you
+// switch projects, so it attaches to that project's session instead of the old one.
+function TerminalOverlay({ show, projectId, onToggle, leftInset = 0, rightInset = 0 }) {
+  return (
+    <>
+      <button className="terminal-toggle" style={{ right: rightInset + 12 }} onClick={onToggle}>
+        {show ? "▼ Terminal" : "▲ Terminal"}
+      </button>
+      {show && (
+        <div className="terminal-panel" style={{ left: leftInset, right: rightInset }}>
+          <Terminal key={projectId} projectId={projectId} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function ProjectLanding({ projects, onOpen, onCreate }) {
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await onCreate(name.trim());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (projects === null) {
+    return <div className="landing" />; // still loading
+  }
+
+  return (
+    <div className="landing">
+      <h1>Manga Studio</h1>
+      <div className="project-grid">
+        {projects.map((p) => (
+          <button className="project-card" key={p.id} onClick={() => onOpen(p.id)}>
+            {p.name}
+          </button>
+        ))}
+        <button className="project-card project-card-new" onClick={() => setShowForm(true)}>
+          +
+        </button>
+      </div>
+      {projects.length === 0 && !showForm && (
+        <p className="empty-hint">No projects yet — click + to create your first one.</p>
+      )}
+      {showForm && (
+        <form className="new-project-form" onSubmit={submit}>
+          <input
+            placeholder="Project name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? "Creating…" : "Create"}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+// Simple key/value editor for arbitrary structured details (gender, hairColor, texture, ...)
+function FieldsEditor({ fields, onChange }) {
+  const rows = Object.entries(fields);
+
+  const setRow = (index, key, value) => {
+    const next = [...rows];
+    next[index] = [key, value];
+    onChange(Object.fromEntries(next));
+  };
+  const addRow = () => onChange(Object.fromEntries([...rows, ["", ""]]));
+  const removeRow = (index) => onChange(Object.fromEntries(rows.filter((_, i) => i !== index)));
+
+  return (
+    <div className="fields-editor">
+      {rows.map(([key, value], i) => (
+        <div className="field-row" key={i}>
+          <input placeholder="field (e.g. gender)" value={key} onChange={(e) => setRow(i, e.target.value, value)} />
+          <input placeholder="value" value={value} onChange={(e) => setRow(i, key, e.target.value)} />
+          <button type="button" className="delete" onClick={() => removeRow(i)}>
+            ×
+          </button>
+        </div>
+      ))}
+      <button type="button" className="add-field" onClick={addRow}>
+        + Field
+      </button>
+    </div>
+  );
+}
+
+// The character/place/object creator: fill in info, pick a style, then either upload a
+// picture or click Generate to bridge everything to Codex. Redraw just re-runs
+// generate against the same entity, replacing its image.
+function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, onSaved }) {
+  const singular = ENTITY_KINDS.find((k) => k.value === kind).singular;
+  const [entity, setEntity] = useState(initialEntity);
+  const [name, setName] = useState(initialEntity?.name || "");
+  const [style, setStyle] = useState(initialEntity?.style || "manga_bw");
+  const [fields, setFields] = useState(
+    Object.fromEntries(Object.entries(initialEntity?.fields || {}).filter(([k]) => k !== "description"))
+  );
+  const [description, setDescription] = useState(initialEntity?.fields?.description || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const allFields = { ...fields, description };
+
+  const saveDetails = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("name", name.trim());
+      formData.append("style", style);
+      formData.append("fields", JSON.stringify(allFields));
+      if (entity) {
+        const updated = await api.updateEntity(projectId, kind, entity.id, formData);
+        setEntity(updated);
+      } else {
+        const created = await api.createEntity(projectId, kind, formData);
+        setEntity(created);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generate = async () => {
+    if (!entity) {
+      setError("Save the details first, then generate.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await api.generateEntity(projectId, kind, entity.id);
+      setEntity(updated);
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uploadImage = async (file) => {
+    if (!entity) {
+      setError("Save the details first, then upload a picture.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const updated = await api.updateEntity(projectId, kind, entity.id, formData);
+      setEntity(updated);
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!entity) return onClose();
+    await api.deleteEntity(projectId, kind, entity.id);
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal entity-modal">
+        <div className="panel-editor-header">
+          <h2>{entity ? entity.name : `New ${singular}`}</h2>
+          <button onClick={onClose}>Close</button>
+        </div>
+
+        <section>
+          <h4>Picture</h4>
+          {entity?.imageUrl ? (
+            <img className="entity-preview" src={entity.imageUrl} alt={entity.name} />
+          ) : (
+            <div className="entity-preview entity-preview-empty">No image yet</div>
+          )}
+          <input type="file" accept="image/*" onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])} />
+        </section>
+
+        <section>
+          <h4>Name</h4>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
+        </section>
+
+        <section>
+          <h4>Description</h4>
+          <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </section>
+
+        <section>
+          <h4>Details</h4>
+          <FieldsEditor fields={fields} onChange={setFields} />
+        </section>
+
+        <section>
+          <h4>Style</h4>
+          <select value={style} onChange={(e) => setStyle(e.target.value)}>
+            {STYLE_PRESETS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </section>
+
+        {error && <p className="error">{error}</p>}
+
+        <button className="primary" onClick={saveDetails} disabled={busy || !name.trim()}>
+          {busy ? "Saving…" : entity ? "Save changes" : "Create"}
+        </button>
+
+        <button className="primary" onClick={generate} disabled={busy || !entity}>
+          {busy ? "Generating…" : entity?.imageUrl ? "Redraw" : "Generate"}
+        </button>
+
+        {entity && (
+          <button className="delete-entity" onClick={remove}>
+            Delete {singular}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PageBar({ pages, currentPageId, onOpen, onCreate }) {
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [layout, setLayout] = useState("grid_2x2");
+  const [stylePreset, setStylePreset] = useState("manga_bw");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    await onCreate({ title, layout, stylePreset });
+    setTitle("");
+    setShowForm(false);
+  };
+
+  return (
+    <div className="page-bar">
+      <select value={currentPageId || ""} onChange={(e) => onOpen(e.target.value)}>
+        <option value="" disabled>
+          Select a page…
+        </option>
+        {pages.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.title}
+          </option>
+        ))}
+      </select>
+      <button onClick={() => setShowForm((v) => !v)}>+ New page</button>
+
+      {showForm && (
+        <form className="new-page-form" onSubmit={submit}>
+          <input placeholder="Page title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <select value={layout} onChange={(e) => setLayout(e.target.value)}>
+            {LAYOUTS.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+          <select value={stylePreset} onChange={(e) => setStylePreset(e.target.value)}>
+            {STYLE_PRESETS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <button type="submit">Create</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function PageCanvas({ page, selectedPanelId, onSelect }) {
+  const gridClass = { single: "grid-single", grid_1x3: "grid-1x3", grid_2x2: "grid-2x2" }[page.layout] || "grid-2x2";
+
+  return (
+    <div className={`page-canvas ${gridClass}`}>
+      {page.panels.map((panel) => (
+        <button
+          key={panel.id}
+          className={`panel-slot ${panel.id === selectedPanelId ? "selected" : ""}`}
+          onClick={() => onSelect(panel.id)}
+        >
+          {panel.imageAssetId ? (
+            <img src={`/uploads/${panel.imageAssetId}.png`} alt="" />
+          ) : (
+            <span className="placeholder">Click to set up panel {panel.order + 1}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PanelEditor({ projectId, page, panel, characters, places, objects, onClose, onUpdated }) {
+  const [characterIds, setCharacterIds] = useState(panel.characterIds || []);
+  const [placeId, setPlaceId] = useState(panel.placeId || "");
+  const [objectIds, setObjectIds] = useState(panel.objectIds || []);
+  const [sceneDescription, setSceneDescription] = useState(panel.sceneDescription || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = (list, setList, id) => setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
+  const generate = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.generatePanel(projectId, page.id, panel.id, {
+        characterIds,
+        placeId: placeId || null,
+        objectIds,
+        sceneDescription,
+      });
+      await onUpdated();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel-editor">
+      <div className="panel-editor-header">
+        <h3>Panel {panel.order + 1}</h3>
+        <button onClick={onClose}>Close</button>
+      </div>
+
+      <section>
+        <h4>Characters</h4>
+        <div className="checkbox-grid">
+          {characters.map((c) => (
+            <label key={c.id}>
+              <input
+                type="checkbox"
+                checked={characterIds.includes(c.id)}
+                onChange={() => toggle(characterIds, setCharacterIds, c.id)}
+              />
+              {c.name}
+            </label>
+          ))}
+          {characters.length === 0 && <p className="empty-hint">Add characters in the sidebar first.</p>}
+        </div>
+      </section>
+
+      <section>
+        <h4>Place</h4>
+        <select value={placeId} onChange={(e) => setPlaceId(e.target.value)}>
+          <option value="">None</option>
+          {places.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      <section>
+        <h4>Objects</h4>
+        <div className="checkbox-grid">
+          {objects.map((o) => (
+            <label key={o.id}>
+              <input
+                type="checkbox"
+                checked={objectIds.includes(o.id)}
+                onChange={() => toggle(objectIds, setObjectIds, o.id)}
+              />
+              {o.name}
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h4>Scene description</h4>
+        <textarea
+          rows={4}
+          value={sceneDescription}
+          onChange={(e) => setSceneDescription(e.target.value)}
+          placeholder="What's happening in this panel?"
+        />
+      </section>
+
+      {error && <p className="error">{error}</p>}
+
+      <button className="primary" onClick={generate} disabled={busy}>
+        {busy ? "Generating…" : panel.imageAssetId ? "Regenerate panel" : "Generate panel"}
+      </button>
+    </div>
+  );
+}
