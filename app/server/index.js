@@ -123,15 +123,14 @@ for (const kind of ENTITY_KINDS) {
 
 // ---------- Pages (project-scoped) ----------
 
-const LAYOUT_PANEL_COUNT = { single: 1, grid_1x3: 3, grid_2x2: 4 };
-
 app.get("/api/projects/:projectId/pages", (req, res) => {
   res.json(listPages(req.params.projectId));
 });
 
 app.post("/api/projects/:projectId/pages", (req, res) => {
-  const { title, layout = "grid_2x2", stylePreset = "manga_bw" } = req.body;
-  const panelCount = LAYOUT_PANEL_COUNT[layout] ?? 4;
+  // panelCount comes from the frontend's layout template (see LAYOUTS in App.jsx) —
+  // the backend doesn't need its own copy of every layout's panel count, just the count.
+  const { title, layout = "grid-2x2", stylePreset = "manga_bw", panelCount = 4 } = req.body;
 
   const page = {
     id: nanoid(10),

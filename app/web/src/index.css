@@ -30,9 +30,16 @@ body {
 
 .sidebar-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   margin-bottom: 16px;
+}
+
+.app-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e8e8ec;
 }
 
 .settings-link {
@@ -280,6 +287,46 @@ textarea {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.layout-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.layout-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: #26272f;
+  border: 2px solid #34353f;
+  border-radius: 6px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.layout-option.selected {
+  border-color: #4a5cff;
+}
+
+.layout-preview {
+  display: grid;
+  gap: 2px;
+  width: 40px;
+  height: 56px; /* mirrors the 5:7 page-canvas aspect ratio */
+}
+
+.layout-preview-panel {
+  background: #666;
+  border-radius: 1px;
+}
+
+.layout-option-label {
+  font-size: 10px;
+  color: #999;
 }
 
 button {
@@ -297,32 +344,26 @@ button {
 
 .page-canvas {
   display: grid;
-  gap: 12px;
-  max-width: 700px;
-}
-
-.grid-single {
-  grid-template-columns: 1fr;
-}
-
-.grid-1x3 {
-  grid-template-columns: 1fr;
-}
-
-.grid-2x2 {
-  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  max-width: 640px;
+  aspect-ratio: 5 / 7; /* approximate manga page trim size */
+  background: #1c1d24;
+  padding: 10px;
+  border-radius: 4px;
 }
 
 .panel-slot {
-  aspect-ratio: 3/4;
   background: #22232b;
   border: 2px solid #2a2b33;
-  border-radius: 10px;
+  border-radius: 4px;
   padding: 0;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 0;
+  min-width: 0;
 }
 
 .panel-slot.selected {

@@ -1,4 +1,4 @@
-# Manga Maker Studio
+# Ibraheem Manga Studio
 
 A local-first manga creation studio: organize a project into characters, places,
 and objects, generate reference art for each one, then compose them into

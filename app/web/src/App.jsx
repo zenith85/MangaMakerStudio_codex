@@ -2,10 +2,83 @@ import { useEffect, useState, useCallback } from "react";
 import { api } from "./api";
 import Terminal from "./Terminal";
 
+// Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
+// in order, so a layout's look comes entirely from its grid-template — no
+// per-panel styling needed. `panelCount` drives how many panels a page gets.
 const LAYOUTS = [
-  { value: "single", label: "Single panel" },
-  { value: "grid_1x3", label: "3 panels (vertical)" },
-  { value: "grid_2x2", label: "4 panels (grid)" },
+  { value: "single", label: "1 panel — splash page", panelCount: 1, areas: `"p1"`, columns: "1fr", rows: "1fr" },
+  {
+    value: "stack-2",
+    label: "2 panels — stacked",
+    panelCount: 2,
+    areas: `"p1" "p2"`,
+    columns: "1fr",
+    rows: "1fr 1fr",
+  },
+  {
+    value: "side-2",
+    label: "2 panels — side by side",
+    panelCount: 2,
+    areas: `"p1 p2"`,
+    columns: "1fr 1fr",
+    rows: "1fr",
+  },
+  {
+    value: "stack-3",
+    label: "3 panels — stacked",
+    panelCount: 3,
+    areas: `"p1" "p2" "p3"`,
+    columns: "1fr",
+    rows: "1fr 1fr 1fr",
+  },
+  {
+    value: "big-top-3",
+    label: "3 panels — big top + 2 below",
+    panelCount: 3,
+    areas: `"p1 p1" "p2 p3"`,
+    columns: "1fr 1fr",
+    rows: "2fr 1fr",
+  },
+  {
+    value: "big-bottom-3",
+    label: "3 panels — 2 above + big bottom",
+    panelCount: 3,
+    areas: `"p1 p2" "p3 p3"`,
+    columns: "1fr 1fr",
+    rows: "1fr 2fr",
+  },
+  {
+    value: "grid-2x2",
+    label: "4 panels — grid",
+    panelCount: 4,
+    areas: `"p1 p2" "p3 p4"`,
+    columns: "1fr 1fr",
+    rows: "1fr 1fr",
+  },
+  {
+    value: "big-left-4",
+    label: "4 panels — big left + 3 stacked right",
+    panelCount: 4,
+    areas: `"p1 p2" "p1 p3" "p1 p4"`,
+    columns: "2fr 1fr",
+    rows: "1fr 1fr 1fr",
+  },
+  {
+    value: "big-right-4",
+    label: "4 panels — 3 stacked left + big right",
+    panelCount: 4,
+    areas: `"p2 p1" "p3 p1" "p4 p1"`,
+    columns: "1fr 2fr",
+    rows: "1fr 1fr 1fr",
+  },
+  {
+    value: "grid-2x3",
+    label: "6 panels — grid",
+    panelCount: 6,
+    areas: `"p1 p2" "p3 p4" "p5 p6"`,
+    columns: "1fr 1fr",
+    rows: "1fr 1fr 1fr",
+  },
 ];
 
 const STYLE_PRESETS = [
@@ -71,7 +144,8 @@ export default function App() {
   };
 
   const createPage = async ({ title, layout, stylePreset }) => {
-    const page = await api.createPage(currentProjectId, { title, layout, stylePreset });
+    const panelCount = LAYOUTS.find((l) => l.value === layout)?.panelCount ?? 4;
+    const page = await api.createPage(currentProjectId, { title, layout, stylePreset, panelCount });
     await refreshPages(currentProjectId);
     setCurrentPage(page);
   };
@@ -108,6 +182,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="sidebar-header">
+          <span className="app-name">Ibraheem Manga Studio</span>
           <button className="back-link" onClick={() => setCurrentProjectId(null)}>
             ← Projects
           </button>
@@ -232,7 +307,7 @@ function ProjectLanding({ projects, onOpen, onCreate }) {
 
   return (
     <div className="landing">
-      <h1>Manga Studio</h1>
+      <h1>Ibraheem Manga Studio</h1>
       <div className="project-grid">
         {projects.map((p) => (
           <button className="project-card" key={p.id} onClick={() => onOpen(p.id)}>
@@ -445,7 +520,7 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
 function PageBar({ pages, currentPageId, onOpen, onCreate }) {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
-  const [layout, setLayout] = useState("grid_2x2");
+  const [layout, setLayout] = useState("grid-2x2");
   const [stylePreset, setStylePreset] = useState("manga_bw");
 
   const submit = async (e) => {
@@ -472,13 +547,7 @@ function PageBar({ pages, currentPageId, onOpen, onCreate }) {
       {showForm && (
         <form className="new-page-form" onSubmit={submit}>
           <input placeholder="Page title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <select value={layout} onChange={(e) => setLayout(e.target.value)}>
-            {LAYOUTS.map((l) => (
-              <option key={l.value} value={l.value}>
-                {l.label}
-              </option>
-            ))}
-          </select>
+          <LayoutPicker value={layout} onChange={setLayout} />
           <select value={stylePreset} onChange={(e) => setStylePreset(e.target.value)}>
             {STYLE_PRESETS.map((s) => (
               <option key={s.value} value={s.value}>
@@ -493,15 +562,52 @@ function PageBar({ pages, currentPageId, onOpen, onCreate }) {
   );
 }
 
+// Visual grid of layout thumbnails — each one renders a small live replica of the
+// actual panel arrangement (same grid template as the real page), so you can see the
+// shape directly instead of guessing from a text label.
+function LayoutPicker({ value, onChange }) {
+  return (
+    <div className="layout-picker">
+      {LAYOUTS.map((l) => (
+        <button
+          key={l.value}
+          type="button"
+          className={`layout-option ${l.value === value ? "selected" : ""}`}
+          onClick={() => onChange(l.value)}
+          title={l.label}
+        >
+          <div
+            className="layout-preview"
+            style={{ gridTemplateAreas: l.areas, gridTemplateColumns: l.columns, gridTemplateRows: l.rows }}
+          >
+            {Array.from({ length: l.panelCount }, (_, i) => (
+              <div key={i} className="layout-preview-panel" style={{ gridArea: `p${i + 1}` }} />
+            ))}
+          </div>
+          <span className="layout-option-label">{l.panelCount}p</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PageCanvas({ page, selectedPanelId, onSelect }) {
-  const gridClass = { single: "grid-single", grid_1x3: "grid-1x3", grid_2x2: "grid-2x2" }[page.layout] || "grid-2x2";
+  const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
 
   return (
-    <div className={`page-canvas ${gridClass}`}>
-      {page.panels.map((panel) => (
+    <div
+      className="page-canvas"
+      style={{
+        gridTemplateAreas: template.areas,
+        gridTemplateColumns: template.columns,
+        gridTemplateRows: template.rows,
+      }}
+    >
+      {page.panels.map((panel, i) => (
         <button
           key={panel.id}
           className={`panel-slot ${panel.id === selectedPanelId ? "selected" : ""}`}
+          style={{ gridArea: `p${i + 1}` }}
           onClick={() => onSelect(panel.id)}
         >
           {panel.imageAssetId ? (
