@@ -31,53 +31,117 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
-// Clip-path for shapes that aren't a plain rect/ellipse. Both are the same "alternate
-// outer/inner radius around a circle" construction — star uses a big depth difference
-// for sharp jagged spikes (the classic manga "shout" bubble), thought uses a shallow
-// one with more, smaller bumps for a scalloped cloud outline (the classic "thinking"
-// bubble) instead of the star's plain 5-point look, which reads as too generic.
-function scallopedPolygon(bumps, outerR, innerR) {
-  const points = [];
+// Every shape is described as a list of {x,y} points (percent, in the bubble's own
+// 0-100 local box) tracing its outline — an ellipse and a scalloped cloud are just
+// sampled more finely than a plain rectangle. Keeping them all as point lists (rather
+// than CSS border-radius/clip-path) is what makes it possible to splice the tail
+// directly into the same outline below, instead of drawing it as a separate shape that
+// only approximately lines up with the bubble's edge.
+function ellipseBoundary(n = 64) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    pts.push({ x: 50 + 50 * Math.sin(a), y: 50 - 50 * Math.cos(a) });
+  }
+  return pts;
+}
+
+function rectangleBoundary() {
+  return [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ];
+}
+
+// Star and thought are the same "alternating outer/inner radius" construction — star
+// uses a big depth difference for sharp jagged spikes (the classic manga "shout"
+// bubble), thought a shallow one with more, smaller bumps for a scalloped cloud outline
+// (the classic "thinking" bubble) instead of the star's plain 5-point look, which reads
+// as too generic/decorative for that use.
+function scallopedBoundary(bumps, outerR, innerR) {
+  const pts = [];
   for (let i = 0; i < bumps * 2; i++) {
     const r = i % 2 === 0 ? outerR : innerR;
     const angle = (Math.PI * i) / bumps;
-    const x = 50 + r * Math.sin(angle);
-    const y = 50 - r * Math.cos(angle);
-    points.push(`${x}% ${y}%`);
+    pts.push({ x: 50 + r * Math.sin(angle), y: 50 - r * Math.cos(angle) });
   }
-  return `polygon(${points.join(", ")})`;
+  return pts;
 }
 
-function clipPathFor(shape) {
-  if (shape === "star") return scallopedPolygon(12, 50, 32);
-  if (shape === "thought") return scallopedPolygon(16, 50, 42);
-  return undefined;
+function boundaryFor(shape) {
+  if (shape === "rectangle") return rectangleBoundary();
+  if (shape === "star") return scallopedBoundary(12, 50, 32);
+  if (shape === "thought") return scallopedBoundary(16, 50, 42);
+  return ellipseBoundary();
 }
 
-// Where the tail attaches to the bubble: the point where a ray from the bubble's
-// center toward the tail tip exits its bounding box.
-function tailBasePoint(bubble) {
-  const cx = bubble.x + bubble.width / 2;
-  const cy = bubble.y + bubble.height / 2;
-  const dx = bubble.tail.x - cx;
-  const dy = bubble.tail.y - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-  const hw = bubble.width / 2;
-  const hh = bubble.height / 2;
-  const scale = Math.min(dx !== 0 ? Math.abs(hw / dx) : Infinity, dy !== 0 ? Math.abs(hh / dy) : Infinity);
-  return { x: cx + dx * scale, y: cy + dy * scale };
+function normalizeAngle(a) {
+  const twoPi = Math.PI * 2;
+  return ((a % twoPi) + twoPi) % twoPi;
 }
 
-function tailPolygonPoints(bubble, base) {
-  const dx = bubble.tail.x - base.x;
-  const dy = bubble.tail.y - base.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
-  const spread = 4; // percent, half-width of the tail's base
-  const p1 = { x: base.x + nx * spread, y: base.y + ny * spread };
-  const p2 = { x: base.x - nx * spread, y: base.y - ny * spread };
-  return `${p1.x},${p1.y} ${p2.x},${p2.y} ${bubble.tail.x},${bubble.tail.y}`;
+function angleOf(p) {
+  return normalizeAngle(Math.atan2(p.y - 50, p.x - 50));
+}
+
+// Finds where a ray from the shape's center at `angle` crosses its boundary, by finding
+// which two consecutive sampled points bracket that angle and interpolating between
+// them. This works for any "star-shaped" boundary — one where every ray from the center
+// crosses it exactly once — which is true of all four bubble shapes here.
+function boundaryPointAtAngle(boundary, angle) {
+  const target = normalizeAngle(angle);
+  const n = boundary.length;
+  for (let i = 0; i < n; i++) {
+    const a1 = angleOf(boundary[i]);
+    const a2 = angleOf(boundary[(i + 1) % n]);
+    let span = a2 - a1;
+    if (span <= 0) span += Math.PI * 2;
+    let offset = target - a1;
+    if (offset < 0) offset += Math.PI * 2;
+    if (offset <= span) {
+      const t = span === 0 ? 0 : offset / span;
+      const p1 = boundary[i];
+      const p2 = boundary[(i + 1) % n];
+      return { afterIndex: i, point: { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t } };
+    }
+  }
+  return { afterIndex: n - 1, point: boundary[0] };
+}
+
+// Splices the tail directly into the shape's boundary, as a spike inserted right where
+// a ray toward the tail tip crosses the outline — one continuous outline for the whole
+// bubble, tail included, instead of a separate triangle glued behind it.
+function outlineWithTail(boundary, bubble) {
+  if (!bubble.tail) return boundary;
+
+  const tlx = ((bubble.tail.x - bubble.x) / bubble.width) * 100;
+  const tly = ((bubble.tail.y - bubble.y) / bubble.height) * 100;
+  const angle = Math.atan2(tly - 50, tlx - 50);
+  const { afterIndex, point: base } = boundaryPointAtAngle(boundary, angle);
+
+  const p1 = boundary[afterIndex];
+  const p2 = boundary[(afterIndex + 1) % boundary.length];
+  const ex = p2.x - p1.x;
+  const ey = p2.y - p1.y;
+  const elen = Math.hypot(ex, ey) || 1;
+  const ux = ex / elen;
+  const uy = ey / elen;
+  const spread = 6; // percent, half-width of the tail's base along the boundary
+  const left = { x: base.x - ux * spread, y: base.y - uy * spread };
+  const right = { x: base.x + ux * spread, y: base.y + uy * spread };
+  const tip = { x: tlx, y: tly };
+
+  return [...boundary.slice(0, afterIndex + 1), left, tip, right, ...boundary.slice(afterIndex + 1)];
+}
+
+function pointsToString(pts) {
+  return pts.map((p) => `${p.x},${p.y}`).join(" ");
+}
+
+function pointsToClipPath(pts) {
+  return `polygon(${pts.map((p) => `${p.x}% ${p.y}%`).join(", ")})`;
 }
 
 function startPointerDrag(e, onMove, onEnd) {
@@ -172,38 +236,33 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     onChange({ text }, { commit: true });
   };
 
-  // The clip-path/border-radius shape lives on an inner div, never on the outer
-  // positioning box — clip-path clips its own descendants too (unlike overflow), which
-  // would silently make the toolbar/handles unclickable once a non-rectangular shape
-  // (star) is selected.
+  // The outline (fill + border, tail spliced in) lives in an SVG, separate from the text
+  // — clip-path (used to keep text from spilling into the shape's corners) clips its own
+  // descendants too (unlike overflow), which would silently make the delete
+  // button/resize handle unclickable if it were applied any higher up, on something
+  // that also contains them.
   const outerStyle = {
     left: `${bubble.x}%`,
     top: `${bubble.y}%`,
     width: `${bubble.width}%`,
     height: `${bubble.height}%`,
   };
-  const shapeStyle = {
-    borderRadius: bubble.shape === "oval" ? "50%" : bubble.shape === "rectangle" ? "10px" : undefined,
-    clipPath: clipPathFor(bubble.shape),
-  };
-
-  const tailBase = bubble.tail ? tailBasePoint(bubble) : null;
+  const boundary = boundaryFor(bubble.shape);
+  const outline = outlineWithTail(boundary, bubble);
 
   return (
     <>
-      {bubble.tail && (
-        <svg className="bubble-tail" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <polygon points={tailPolygonPoints(bubble, tailBase)} />
-        </svg>
-      )}
-
       <div
         className={`bubble${editable ? " editable" : ""}`}
         style={outerStyle}
         onPointerDown={editable && !editingText ? moveBody : undefined}
         onDoubleClick={editable ? () => setEditingText(true) : undefined}
       >
-        <div className="bubble-shape" style={shapeStyle}>
+        <svg className="bubble-outline" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polygon points={pointsToString(outline)} vectorEffect="non-scaling-stroke" />
+        </svg>
+
+        <div className="bubble-text-clip" style={{ clipPath: pointsToClipPath(boundary) }}>
           {editingText ? (
             <textarea
               className="bubble-text-input"
