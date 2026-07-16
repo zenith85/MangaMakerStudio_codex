@@ -69,6 +69,22 @@ body {
   margin-bottom: 16px;
 }
 
+.open-folder-button {
+  width: 100%;
+  margin-bottom: 16px;
+  background: #26272f;
+  border: 1px solid #34353f;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 13px;
+  padding: 7px;
+}
+
+.open-folder-button:hover {
+  border-color: #4a5cff;
+  color: #e8e8ec;
+}
+
 .app-name {
   font-size: 15px;
   font-weight: 700;
@@ -315,6 +331,15 @@ textarea {
   margin-bottom: 20px;
   flex-wrap: wrap;
   position: relative;
+}
+
+.pdf-status {
+  color: #8fdb9a;
+  font-size: 13px;
+}
+
+.pdf-status-error {
+  color: #ff6b6b;
 }
 
 .layout-picker-wrap {
@@ -923,8 +948,14 @@ button.primary:disabled {
   max-width: 720px;
 }
 
-.project-card {
+.project-card-wrap {
+  position: relative;
   aspect-ratio: 4/3;
+}
+
+.project-card {
+  width: 100%;
+  height: 100%;
   background: #22232b;
   border: 1px solid #2a2b33;
   border-radius: 10px;
@@ -934,9 +965,30 @@ button.primary:disabled {
 }
 
 .project-card-new {
+  aspect-ratio: 4/3;
   font-size: 32px;
   color: #4a5cff;
   border-style: dashed;
+}
+
+.project-card-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ff8a8a;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.project-card-delete:hover {
+  background: #ff4a5c;
+  color: white;
 }
 
 .back-link {

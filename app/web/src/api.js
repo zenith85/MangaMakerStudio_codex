@@ -17,6 +17,7 @@ export const api = {
   listProjects: () => req("/projects"),
   createProject: (name) => req("/projects", { method: "POST", ...json({ name }) }),
   deleteProject: (id) => req(`/projects/${id}`, { method: "DELETE" }),
+  openProjectFolder: (id) => req(`/projects/${id}/open-folder`, { method: "POST" }),
 
   listEntities: (projectId, kind) => req(`/projects/${projectId}/${kind}`),
   createEntity: (projectId, kind, formData) =>
@@ -45,4 +46,6 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/image`, { method: "POST", body: formData }),
   clearPanelImage: (projectId, pageId, panelId) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/image`, { method: "DELETE" }),
+  savePagePdf: (projectId, pageId, formData) =>
+    req(`/projects/${projectId}/pages/${pageId}/pdf`, { method: "POST", body: formData }),
 };

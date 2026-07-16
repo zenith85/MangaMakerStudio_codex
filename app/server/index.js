@@ -4,6 +4,7 @@ import multer from "multer";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 import { attachTerminal } from "./terminal.js";
@@ -56,6 +57,24 @@ app.post("/api/projects", (req, res) => {
 app.delete("/api/projects/:id", (req, res) => {
   deleteProject(req.params.id);
   res.json({ ok: true });
+});
+
+// Opens the project's folder in the host machine's native file manager — this is a
+// local-only tool, so shelling out to the desktop is in scope, but the command is run
+// via execFile (never a shell string) and the resolved path is checked to stay inside
+// PROJECTS_DIR, so a crafted :id can't inject shell syntax or reach an arbitrary path.
+app.post("/api/projects/:id/open-folder", (req, res) => {
+  const dir = path.resolve(path.join(PROJECTS_DIR, req.params.id));
+  if (!dir.startsWith(path.resolve(PROJECTS_DIR) + path.sep)) {
+    return res.status(400).json({ error: "invalid project id" });
+  }
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: "project not found" });
+
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+  execFile(opener, [dir], (err) => {
+    if (err) console.error(`open-folder: failed to launch ${opener}:`, err.message);
+  });
+  res.json({ ok: true, path: dir });
 });
 
 // ---------- Characters / Places / Objects ----------
@@ -290,6 +309,28 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", (req,
   panel.imageAssetId = null;
   savePages(projectId, pages);
   res.json(panel);
+});
+
+function slugifyPageTitle(title) {
+  const slug = (title || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return slug || "page";
+}
+
+// Saves a finished page as a PDF, rendered client-side (the browser already has the
+// exact composed page — panels, images, speech bubbles — on screen) and posted here to
+// live on disk under the project, in projects/<id>/pages/<page title>.pdf.
+app.post("/api/projects/:projectId/pages/:pageId/pdf", upload.single("pdf"), (req, res) => {
+  const { projectId, pageId } = req.params;
+  const pages = listPages(projectId);
+  const page = pages.find((p) => p.id === pageId);
+  if (!page) return res.status(404).json({ error: "page not found" });
+  if (!req.file) return res.status(400).json({ error: "pdf is required" });
+
+  const dir = path.join(PROJECTS_DIR, projectId, "pages");
+  fs.mkdirSync(dir, { recursive: true });
+  const filename = `${slugifyPageTitle(page.title)}.pdf`;
+  fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+  res.json({ ok: true, filename });
 });
 
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", async (req, res) => {

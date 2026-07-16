@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
@@ -109,6 +111,65 @@ function panelHasContent(panel) {
   return hasNodeContent(panel.sceneDoc);
 }
 
+// html2canvas doesn't reliably honor object-fit/object-position on <img> elements — it
+// tends to just stretch the raw image to fill the box, ignoring the crop/pan the user
+// set up on screen. So before capturing the page for PDF export, this bakes each panel
+// image's actual visible crop onto an offscreen canvas (the same object-fit: cover +
+// object-position math the browser itself uses) and swaps that in as the image's src —
+// by the time html2canvas runs, there's no cropping left for it to get wrong. Returns a
+// function that restores the original images afterward.
+async function precropPanelImages(container) {
+  if (!container) return () => {};
+  const imgs = Array.from(container.querySelectorAll(".panel-slot img"));
+  const restores = [];
+
+  for (const img of imgs) {
+    const cw = img.clientWidth;
+    const ch = img.clientHeight;
+    if (!img.naturalWidth || !cw || !ch) continue;
+
+    const [posXStr, posYStr] = getComputedStyle(img).objectPosition.split(" ");
+    const offsetX = parseFloat(posXStr) || 50;
+    const offsetY = parseFloat(posYStr) || 50;
+
+    const containerRatio = cw / ch;
+    const imgRatio = img.naturalWidth / img.naturalHeight;
+    let sx, sy, sw, sh;
+    if (imgRatio > containerRatio) {
+      sh = img.naturalHeight;
+      sw = sh * containerRatio;
+      sy = 0;
+      sx = (img.naturalWidth - sw) * (offsetX / 100);
+    } else {
+      sw = img.naturalWidth;
+      sh = sw / containerRatio;
+      sx = 0;
+      sy = (img.naturalHeight - sh) * (offsetY / 100);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(cw * 2));
+    canvas.height = Math.max(1, Math.round(ch * 2));
+    canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/png");
+
+    const originalSrc = img.src;
+    const originalObjectPosition = img.style.objectPosition;
+    restores.push(() => {
+      img.src = originalSrc;
+      img.style.objectPosition = originalObjectPosition;
+    });
+
+    await new Promise((resolve) => {
+      img.onload = resolve;
+      img.src = dataUrl;
+    });
+    img.style.objectPosition = "50% 50%";
+  }
+
+  return () => restores.forEach((fn) => fn());
+}
+
 export default function App() {
   const [projects, setProjects] = useState(null); // null = not loaded yet
   const [currentProjectId, setCurrentProjectId] = useState(null);
@@ -119,6 +180,9 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(null);
   const [selectedPanelId, setSelectedPanelId] = useState(null);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfStatus, setPdfStatus] = useState("");
+  const pageCanvasRef = useRef(null);
 
   const refreshProjects = useCallback(() => api.listProjects().then(setProjects), []);
 
@@ -147,6 +211,26 @@ export default function App() {
     const project = await api.createProject(name);
     await refreshProjects();
     openProject(project.id);
+  };
+
+  const deleteProjectById = async (id, name) => {
+    if (!window.confirm(`Delete "${name}" and everything in it — characters, places, objects, pages, panels? This can't be undone.`)) {
+      return;
+    }
+    await api.deleteProject(id);
+    await refreshProjects();
+    if (currentProjectId === id) setCurrentProjectId(null);
+  };
+
+  const [folderStatus, setFolderStatus] = useState("");
+  const openCurrentProjectFolder = async () => {
+    setFolderStatus("");
+    try {
+      await api.openProjectFolder(currentProjectId);
+      setFolderStatus("Opened in file manager");
+    } catch (err) {
+      setFolderStatus(`Failed: ${err.message}`);
+    }
   };
 
   const openPage = async (id) => {
@@ -219,6 +303,40 @@ export default function App() {
     }
   };
 
+  // Renders the page canvas exactly as shown on screen (panels, images, speech bubbles)
+  // to a raster image via html2canvas, drops that into a same-aspect-ratio PDF page, and
+  // posts the bytes to the backend to live under projects/<id>/pages/<title>.pdf.
+  // Deselecting first hides edit-only chrome (delete buttons, resize/tail handles) that
+  // shouldn't appear in the exported page.
+  const exportPagePdf = async () => {
+    const hadSelection = selectedPanelId;
+    setSelectedPanelId(null);
+    await new Promise((r) => setTimeout(r, 50));
+
+    setPdfBusy(true);
+    setPdfStatus("");
+    let restoreImages = () => {};
+    try {
+      restoreImages = await precropPanelImages(pageCanvasRef.current);
+      const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ unit: "px", format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+      const blob = pdf.output("blob");
+
+      const formData = new FormData();
+      formData.append("pdf", blob, "page.pdf");
+      const result = await api.savePagePdf(currentProjectId, currentPage.id, formData);
+      setPdfStatus(`Saved as pages/${result.filename}`);
+    } catch (err) {
+      setPdfStatus(`Failed: ${err.message}`);
+    } finally {
+      restoreImages();
+      setPdfBusy(false);
+      if (hadSelection) setSelectedPanelId(hadSelection);
+    }
+  };
+
   // Switching to a layout with fewer panels drops the trailing ones (grid position
   // comes from array order — see PageCanvas), so warn first if any would be lost.
   const changeLayout = async (layoutValue) => {
@@ -266,7 +384,7 @@ export default function App() {
   if (!currentProjectId) {
     return (
       <>
-        <ProjectLanding projects={projects} onOpen={openProject} onCreate={createProject} />
+        <ProjectLanding projects={projects} onOpen={openProject} onCreate={createProject} onDelete={deleteProjectById} />
         <TerminalOverlay
           show={showTerminal}
           projectId={currentProjectId}
@@ -297,6 +415,13 @@ export default function App() {
             ← Projects
           </button>
         </div>
+
+        <button className="open-folder-button" onClick={openCurrentProjectFolder}>
+          Open folder location
+        </button>
+        {folderStatus && (
+          <p className={`empty-hint${folderStatus.startsWith("Failed") ? " error" : ""}`}>{folderStatus}</p>
+        )}
 
         <div className="tabs">
           {ENTITY_KINDS.map((k) => (
@@ -340,9 +465,13 @@ export default function App() {
           onCreate={createPage}
           onChangeLayout={changeLayout}
           onDelete={deletePage}
+          onExportPdf={exportPagePdf}
+          pdfBusy={pdfBusy}
+          pdfStatus={pdfStatus}
         />
         {currentPage ? (
           <PageCanvas
+            containerRef={pageCanvasRef}
             page={currentPage}
             selectedPanelId={selectedPanelId}
             onSelect={setSelectedPanelId}
@@ -409,7 +538,7 @@ function TerminalOverlay({ show, projectId, onToggle, leftInset = 0, rightInset 
   );
 }
 
-function ProjectLanding({ projects, onOpen, onCreate }) {
+function ProjectLanding({ projects, onOpen, onCreate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -434,9 +563,21 @@ function ProjectLanding({ projects, onOpen, onCreate }) {
       <h1>Ibraheem Manga Studio</h1>
       <div className="project-grid">
         {projects.map((p) => (
-          <button className="project-card" key={p.id} onClick={() => onOpen(p.id)}>
-            {p.name}
-          </button>
+          <div className="project-card-wrap" key={p.id}>
+            <button className="project-card" onClick={() => onOpen(p.id)}>
+              {p.name}
+            </button>
+            <button
+              className="project-card-delete"
+              title={`Delete ${p.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(p.id, p.name);
+              }}
+            >
+              ×
+            </button>
+          </div>
         ))}
         <button className="project-card project-card-new" onClick={() => setShowForm(true)}>
           +
@@ -641,7 +782,7 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   );
 }
 
-function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelete }) {
+function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelete, onExportPdf, pdfBusy, pdfStatus }) {
   const [showForm, setShowForm] = useState(false);
   const [showLayoutPicker, setShowLayoutPicker] = useState(false);
   const [title, setTitle] = useState("");
@@ -698,6 +839,14 @@ function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelet
           Delete page
         </button>
       )}
+      {currentPage && (
+        <button onClick={onExportPdf} disabled={pdfBusy}>
+          {pdfBusy ? "Saving PDF…" : "Save as PDF"}
+        </button>
+      )}
+      {pdfStatus && (
+        <span className={`pdf-status${pdfStatus.startsWith("Failed") ? " pdf-status-error" : ""}`}>{pdfStatus}</span>
+      )}
 
       {showForm && (
         <form className="new-page-form" onSubmit={submit}>
@@ -746,11 +895,21 @@ function LayoutPicker({ value, onChange }) {
   );
 }
 
-function PageCanvas({ page, selectedPanelId, onSelect, onDragImage, onDragImageEnd, onBubblesLive, onBubblesCommit }) {
+function PageCanvas({
+  containerRef,
+  page,
+  selectedPanelId,
+  onSelect,
+  onDragImage,
+  onDragImageEnd,
+  onBubblesLive,
+  onBubblesCommit,
+}) {
   const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
 
   return (
     <div
+      ref={containerRef}
       className="page-canvas"
       style={{
         gridTemplateAreas: template.areas,
