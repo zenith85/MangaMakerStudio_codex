@@ -1032,6 +1032,23 @@ button.primary:disabled {
   width: 100%;
 }
 
+.entity-image-section {
+  border-bottom: 1px solid #2a2b33;
+  padding-bottom: 16px;
+}
+
+.entity-image-tabs {
+  margin-bottom: 10px;
+}
+
+.entity-info-section h4:not(:first-child) {
+  margin-top: 14px;
+}
+
+.entity-info-section .fields-editor {
+  margin-bottom: 4px;
+}
+
 .entity-preview {
   width: 100%;
   aspect-ratio: 1;

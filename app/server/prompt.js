@@ -1,5 +1,9 @@
 const STYLE_SUFFIX = {
   manga_bw: "Render as a black-and-white manga panel with screentone shading and clean line art.",
+  manga_simple:
+    "Render as a simple black-and-white manga panel: bold clean line art, minimal flat shading with only a " +
+    "couple of solid gray tones (no screentone dot patterns, no dense cross-hatching or heavy rendering), " +
+    "plain uncluttered backgrounds — an everyday simple-manga look, not a highly detailed or textured one.",
   manhwa_color: "Render as a full-color manhwa/webtoon panel with soft cel shading.",
   novel_illustration: "Render as a full-bleed painterly light-novel illustration.",
 };
