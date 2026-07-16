@@ -41,6 +41,7 @@ export function parseSceneDoc(doc) {
     characterIds: [...(idsByKind.characters ?? [])],
     placeIds: [...(idsByKind.places ?? [])],
     objectIds: [...(idsByKind.objects ?? [])],
+    panelIds: [...(idsByKind.panels ?? [])],
   };
 }
 

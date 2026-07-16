@@ -262,15 +262,36 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     Object.assign(panel, req.body); // sceneDoc
     savePages(projectId, pages);
 
-    const { plainText, characterIds, placeIds, objectIds } = parseSceneDoc(panel.sceneDoc);
+    const { plainText, characterIds, placeIds, objectIds, panelIds } = parseSceneDoc(panel.sceneDoc);
     const characters = characterIds.map((id) => getEntity(projectId, "characters", id)).filter(Boolean);
     const places = placeIds.map((id) => getEntity(projectId, "places", id)).filter(Boolean);
     const objects = objectIds.map((id) => getEntity(projectId, "objects", id)).filter(Boolean);
+
+    // Panels mentioned in the scene text (e.g. "#Panel 2") anchor continuity — their
+    // generated image comes along as a reference so the room/decor/props stay
+    // consistent, without forcing every panel to inherit whatever came right before it.
+    // Panel ids are unique project-wide, so this can pull in a panel from any page.
+    const continuityPanels = panelIds
+      .map((id) => {
+        for (const pg of pages) {
+          const found = pg.panels.find((p) => p.id === id);
+          if (found) return { ...found, pageTitle: pg.title };
+        }
+        return null;
+      })
+      .filter(Boolean)
+      .map((p) => ({
+        order: p.order,
+        pageTitle: p.pageTitle,
+        plainText: parseSceneDoc(p.sceneDoc).plainText,
+        imageAssetId: p.imageAssetId,
+      }));
 
     const referenceImages = [
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
       ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
+      ...continuityPanels.map((p) => (p.imageAssetId ? loadPanelImage(p.imageAssetId) : null)).filter(Boolean),
     ];
 
     const prompt = buildPrompt({
@@ -278,6 +299,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       characters,
       places,
       objects,
+      continuityPanels,
       stylePreset: page.stylePreset,
     });
 

@@ -12,7 +12,7 @@ function describeFields(fields) {
     .join(", ");
 }
 
-export function buildPrompt({ sceneDescription, characters, places, objects, stylePreset }) {
+export function buildPrompt({ sceneDescription, characters, places, objects, continuityPanels = [], stylePreset }) {
   const parts = [sceneDescription?.trim() || "A manga panel."];
 
   if (characters.length) {
@@ -44,6 +44,18 @@ export function buildPrompt({ sceneDescription, characters, places, objects, sty
       "Objects present, matching their attached reference images exactly: " +
         objects.map((o) => o.name).join(", ") +
         "."
+    );
+  }
+  if (continuityPanels.length) {
+    parts.push(
+      "Continuity — this scene follows directly from " +
+        continuityPanels
+          .map((p) => {
+            const where = p.pageTitle ? ` on "${p.pageTitle}"` : "";
+            return `Panel ${p.order + 1}${where}${p.plainText ? ` ("${p.plainText}")` : ""}`;
+          })
+          .join(", ") +
+        ". Match the room, decor, lighting, and any props exactly as shown in the attached reference image(s) for those panels, unless this panel's own description says something changed."
     );
   }
   parts.push(STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw);

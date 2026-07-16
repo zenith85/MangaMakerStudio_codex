@@ -153,8 +153,13 @@ export default function App() {
     setSelectedPanelId(null);
   };
 
+  // Also patches the page into `pages` (not just `currentPage`) so mentioning this
+  // page's panels for continuity from elsewhere in the project stays up to date.
   const refreshCurrentPage = async () => {
-    if (currentPage) setCurrentPage(await api.getPage(currentProjectId, currentPage.id));
+    if (!currentPage) return;
+    const updated = await api.getPage(currentProjectId, currentPage.id);
+    setCurrentPage(updated);
+    setPages((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   };
 
   // Live drag feedback (no network call) — see PanelThumb's pointermove handler.
@@ -207,10 +212,18 @@ export default function App() {
     if (!window.confirm("Delete this panel? This can't be undone.")) return;
     const updated = await api.deletePanel(currentProjectId, currentPage.id, panelId);
     setCurrentPage(updated);
+    setPages((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     setSelectedPanelId(null);
   };
 
   const selectedPanel = currentPage?.panels.find((p) => p.id === selectedPanelId) || null;
+
+  // Every panel across every page in the project, for the scene editor's #mention list
+  // (continuity references aren't limited to the current page). `currentPage` stands in
+  // for its own entry in `pages` so its panels are never stale mid-edit.
+  const allPanelsForMention = pages
+    .map((p) => (p.id === currentPage?.id ? currentPage : p))
+    .flatMap((p) => p.panels.map((panel) => ({ ...panel, pageTitle: p.title })));
 
   // ---------- Landing: no project open yet ----------
   if (!currentProjectId) {
@@ -312,6 +325,7 @@ export default function App() {
           characters={entities.characters}
           places={entities.places}
           objects={entities.objects}
+          allPanels={allPanelsForMention}
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
           onDelete={deletePanel}
@@ -789,7 +803,7 @@ function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragIm
   );
 }
 
-function PanelEditor({ projectId, page, panel, characters, places, objects, onClose, onUpdated, onDelete }) {
+function PanelEditor({ projectId, page, panel, characters, places, objects, allPanels, onClose, onUpdated, onDelete }) {
   const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -823,9 +837,18 @@ function PanelEditor({ projectId, page, panel, characters, places, objects, onCl
         <h4>Scene description</h4>
         <p className="scene-editor-hint">
           Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
-          highlighted, and its reference image will be used when generating this panel.
+          highlighted, and its reference image will be used when generating this panel. Type{" "}
+          <strong>@</strong> to mention any panel from any page (e.g. "@Page 1 · Panel 2") to keep
+          its room, decor, and props consistent here.
         </p>
-        <SceneEditor content={sceneDoc} onChange={setSceneDoc} characters={characters} places={places} objects={objects} />
+        <SceneEditor
+          content={sceneDoc}
+          onChange={setSceneDoc}
+          characters={characters}
+          places={places}
+          objects={objects}
+          panels={allPanels.filter((p) => p.id !== panel.id)}
+        />
         {characters.length === 0 && places.length === 0 && objects.length === 0 && (
           <p className="empty-hint">Add characters, places, or objects in the sidebar first.</p>
         )}

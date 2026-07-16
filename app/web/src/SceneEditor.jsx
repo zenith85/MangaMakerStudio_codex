@@ -12,15 +12,24 @@ function buildEntityItems(characters, places, objects) {
   ];
 }
 
-// `entitiesRef` is read fresh by items() on every keystroke, so the suggestion list
-// stays current without rebuilding the Mention extension (and thus the editor) whenever
-// the project's characters/places/objects change.
-function mentionSuggestion(entitiesRef) {
+function buildPanelItems(panels) {
+  return panels.map((p) => ({
+    id: `panels:${p.id}`,
+    label: p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`,
+    kind: "panels",
+    imageUrl: p.imageAssetId ? `/uploads/${p.imageAssetId}.png` : null,
+  }));
+}
+
+// `itemsRef` is read fresh by items() on every keystroke, so the suggestion list stays
+// current without rebuilding the Mention extension (and thus the editor) whenever the
+// underlying characters/places/objects/panels change.
+function mentionSuggestion(char, itemsRef) {
   return {
-    char: "#",
+    char,
     items: ({ query }) => {
       const q = query.toLowerCase();
-      return entitiesRef.current.filter((e) => e.label.toLowerCase().includes(q)).slice(0, 8);
+      return itemsRef.current.filter((e) => e.label.toLowerCase().includes(q)).slice(0, 8);
     },
     render: () => {
       let component;
@@ -51,23 +60,27 @@ function mentionSuggestion(entitiesRef) {
   };
 }
 
-// Rich-text scene description for a panel: typing # opens a searchable dropdown across
-// this project's characters/places/objects; picking one inserts an inline, colored
-// mention token. The resulting Tiptap doc (see onChange) is the sole source of a
-// panel's cast and setting — parseSceneDoc (server/scene.js) pulls both back out of it.
-export default function SceneEditor({ content, onChange, characters, places, objects }) {
+// Rich-text scene description for a panel. Two mention triggers: # opens a searchable
+// dropdown across this project's characters/places/objects; @ opens one across every
+// panel on every page (so you can anchor continuity — "match Page 1's Panel 2 room" —
+// without forcing every panel to inherit whatever came right before it). Picking one
+// inserts an inline, colored mention token. The resulting Tiptap doc (see onChange) is
+// the sole source of a panel's cast, setting, and continuity references —
+// parseSceneDoc (server/scene.js) pulls them back out regardless of which trigger
+// inserted them.
+export default function SceneEditor({ content, onChange, characters, places, objects, panels = [] }) {
   const entitiesRef = useRef([]);
-  entitiesRef.current = useMemo(
-    () => buildEntityItems(characters, places, objects),
-    [characters, places, objects]
-  );
+  entitiesRef.current = useMemo(() => buildEntityItems(characters, places, objects), [characters, places, objects]);
+
+  const panelsRef = useRef([]);
+  panelsRef.current = useMemo(() => buildPanelItems(panels), [panels]);
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: false }),
       Mention.configure({
         HTMLAttributes: { class: "mention-token" },
-        suggestion: mentionSuggestion(entitiesRef),
+        suggestions: [mentionSuggestion("#", entitiesRef), mentionSuggestion("@", panelsRef)],
       }),
     ],
     content,
