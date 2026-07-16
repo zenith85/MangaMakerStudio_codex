@@ -41,4 +41,8 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "DELETE" }),
   generatePanel: (projectId, pageId, panelId, body) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/generate`, { method: "POST", ...json(body) }),
+  uploadPanelImage: (projectId, pageId, panelId, formData) =>
+    req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/image`, { method: "POST", body: formData }),
+  clearPanelImage: (projectId, pageId, panelId) =>
+    req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/image`, { method: "DELETE" }),
 };

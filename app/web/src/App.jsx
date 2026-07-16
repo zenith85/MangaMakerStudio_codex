@@ -902,6 +902,8 @@ function PanelEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("scene");
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState("");
 
   const generate = async () => {
     setBusy(true);
@@ -913,6 +915,34 @@ function PanelEditor({
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const uploadImage = async (file) => {
+    setImageBusy(true);
+    setImageError("");
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      await api.uploadPanelImage(projectId, page.id, panel.id, formData);
+      await onUpdated();
+    } catch (err) {
+      setImageError(err.message);
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const clearImage = async () => {
+    setImageBusy(true);
+    setImageError("");
+    try {
+      await api.clearPanelImage(projectId, page.id, panel.id);
+      await onUpdated();
+    } catch (err) {
+      setImageError(err.message);
+    } finally {
+      setImageBusy(false);
     }
   };
 
@@ -944,6 +974,9 @@ function PanelEditor({
       </div>
 
       <div className="tabs panel-editor-tabs">
+        <button className={tab === "image" ? "active" : ""} onClick={() => setTab("image")}>
+          Image
+        </button>
         <button className={tab === "scene" ? "active" : ""} onClick={() => setTab("scene")}>
           Scene
         </button>
@@ -951,6 +984,38 @@ function PanelEditor({
           Speech bubbles
         </button>
       </div>
+
+      {tab === "image" && (
+        <section className="panel-editor-upper panel-editor-image">
+          <h4>Panel image</h4>
+          <p className="scene-editor-hint">
+            Generated images don't always land well-composed in the frame. Upload your own
+            picture here instead — it'll drop into the panel the same way, and you can still
+            drag it to reposition and resize its crop right on the panel.
+          </p>
+
+          {panel.imageAssetId ? (
+            <img className="panel-image-preview" src={`/uploads/${panel.imageAssetId}.png`} alt="" />
+          ) : (
+            <div className="panel-image-preview panel-image-preview-empty">No image yet</div>
+          )}
+
+          <input
+            type="file"
+            accept="image/*"
+            disabled={imageBusy}
+            onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
+          />
+
+          {imageError && <p className="error">{imageError}</p>}
+
+          {panel.imageAssetId && (
+            <button className="delete-panel image-clear-button" onClick={clearImage} disabled={imageBusy}>
+              Remove image
+            </button>
+          )}
+        </section>
+      )}
 
       {tab === "scene" && (
         <section className="panel-editor-upper">

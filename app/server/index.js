@@ -264,6 +264,34 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
   res.json(page);
 });
 
+// Manually sets (or replaces) a panel's image directly, bypassing Codex — for when a
+// generated image isn't well composed and the user would rather place their own.
+// Resets imageOffset back to centered since a brand new image's crop has no relation to
+// whatever the previous one's pan position was.
+app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", upload.single("image"), (req, res) => {
+  const { projectId, pageId, panelId } = req.params;
+  const { pages, panel } = findPanel(projectId, pageId, panelId);
+  if (!panel) return res.status(404).json({ error: "panel not found" });
+  if (!req.file) return res.status(400).json({ error: "image is required" });
+
+  deletePanelAsset(panel);
+  panel.imageAssetId = savePanelImage(req.file.buffer);
+  panel.imageOffset = { x: 50, y: 50 };
+  savePages(projectId, pages);
+  res.json({ ...panel, imageUrl: panelImageUrl(panel.imageAssetId) });
+});
+
+app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", (req, res) => {
+  const { projectId, pageId, panelId } = req.params;
+  const { pages, panel } = findPanel(projectId, pageId, panelId);
+  if (!panel) return res.status(404).json({ error: "panel not found" });
+
+  deletePanelAsset(panel);
+  panel.imageAssetId = null;
+  savePages(projectId, pages);
+  res.json(panel);
+});
+
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;

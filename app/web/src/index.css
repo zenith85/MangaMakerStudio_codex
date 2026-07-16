@@ -999,6 +999,34 @@ button.primary:disabled {
   justify-content: center;
 }
 
+.panel-image-preview {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  background: #16171c;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-image-preview-empty {
+  background: #22232b;
+  color: #666;
+  font-size: 13px;
+}
+
+.image-clear-button {
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: 1px solid #ff4a5c;
+  color: #ff4a5c;
+  padding: 8px;
+  border-radius: 8px;
+}
+
 .delete-entity {
   width: 100%;
   margin-top: 10px;
