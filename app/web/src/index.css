@@ -372,6 +372,7 @@ button {
 }
 
 .panel-slot {
+  position: relative;
   background: #22232b;
   border: 2px solid #2a2b33;
   border-radius: 4px;
@@ -482,11 +483,79 @@ button {
   gap: 6px;
 }
 
-.scene-editor-section {
+.panel-editor-upper {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 320px;
+}
+
+.panel-editor-upper .primary {
+  margin-top: 12px;
+}
+
+.panel-editor-lower {
+  flex-shrink: 0;
+  border-top: 1px solid #2a2b33;
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.panel-editor-lower .primary {
+  margin-bottom: 10px;
+}
+
+.bubble-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bubble-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #16171c;
+  border: 1px solid #2e2f38;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.bubble-list-label {
+  flex: 1;
+  font-size: 13px;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubble-list-shapes {
+  display: flex;
+  gap: 4px;
+}
+
+.bubble-list-shapes button {
+  background: #26272f;
+  border: 1px solid #34353f;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
+.bubble-list-shapes button.active {
+  background: #4a5cff;
+  border-color: #4a5cff;
+  color: white;
+}
+
+.bubble-list-row .delete {
+  background: none;
+  border: none;
+  color: #ff6b6b;
+  font-size: 15px;
+  padding: 0 2px;
 }
 
 .scene-editor-hint {
@@ -792,4 +861,105 @@ button.primary:disabled {
 .terminal-container {
   width: 100%;
   height: 100%;
+}
+
+/* ---------- Speech bubbles ---------- */
+
+.bubble {
+  position: absolute;
+  z-index: 5;
+}
+
+.bubble.editable {
+  cursor: move;
+  z-index: 6;
+}
+
+.bubble-shape {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border: 2px solid #1a1a1a;
+  box-sizing: border-box;
+}
+
+.bubble-text,
+.bubble-text-input {
+  width: 100%;
+  height: 100%;
+  padding: 6%;
+  box-sizing: border-box;
+  color: #111;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: center;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.bubble-text-input {
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-family: inherit;
+}
+
+.bubble-delete {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  color: white;
+  border: none;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.bubble-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: #4a5cff;
+  border: 2px solid white;
+  cursor: nwse-resize;
+}
+
+.bubble-tail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.bubble-tail polygon {
+  fill: white;
+  stroke: #1a1a1a;
+  stroke-width: 0.6;
+}
+
+.bubble-tail-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: #4a5cff;
+  border: 2px solid white;
+  cursor: grab;
+  z-index: 6;
 }

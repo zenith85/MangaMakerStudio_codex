@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
+import Bubble, { newBubble, SHAPES, defaultTailFor } from "./Bubble";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
 // in order, so a layout's look comes entirely from its grid-template — no
@@ -175,6 +176,26 @@ export default function App() {
     api.updatePanel(currentProjectId, currentPage.id, panelId, { imageOffset });
   };
 
+  // Live bubble edits (drag/resize/tail-aim in progress) — local only, no network call.
+  const updateBubblesLive = (panelId, bubbles) => {
+    setCurrentPage((page) => ({
+      ...page,
+      panels: page.panels.map((p) => (p.id === panelId ? { ...p, bubbles } : p)),
+    }));
+  };
+
+  // Persist bubbles — called once at the end of a drag, or immediately for discrete
+  // actions (add/delete/shape change/text edit).
+  const commitBubbles = (panelId, bubbles) => {
+    updateBubblesLive(panelId, bubbles);
+    api.updatePanel(currentProjectId, currentPage.id, panelId, { bubbles });
+  };
+
+  const addBubble = (panelId) => {
+    const panel = currentPage.panels.find((p) => p.id === panelId);
+    commitBubbles(panelId, [...(panel.bubbles || []), newBubble()]);
+  };
+
   const createPage = async ({ title, layout, stylePreset }) => {
     const panelCount = LAYOUTS.find((l) => l.value === layout)?.panelCount ?? 4;
     const page = await api.createPage(currentProjectId, { title, layout, stylePreset, panelCount });
@@ -326,6 +347,8 @@ export default function App() {
             onSelect={setSelectedPanelId}
             onDragImage={dragPanelImage}
             onDragImageEnd={commitPanelImage}
+            onBubblesLive={updateBubblesLive}
+            onBubblesCommit={commitBubbles}
           />
         ) : (
           <p className="empty-hint">Create a page to get started.</p>
@@ -345,6 +368,8 @@ export default function App() {
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
           onDelete={deletePanel}
+          onAddBubble={addBubble}
+          onCommitBubbles={commitBubbles}
         />
       )}
 
@@ -709,7 +734,7 @@ function LayoutPicker({ value, onChange }) {
   );
 }
 
-function PageCanvas({ page, selectedPanelId, onSelect, onDragImage, onDragImageEnd }) {
+function PageCanvas({ page, selectedPanelId, onSelect, onDragImage, onDragImageEnd, onBubblesLive, onBubblesCommit }) {
   const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
 
   return (
@@ -730,6 +755,8 @@ function PageCanvas({ page, selectedPanelId, onSelect, onDragImage, onDragImageE
           onSelect={onSelect}
           onDragImage={onDragImage}
           onDragImageEnd={onDragImageEnd}
+          onBubblesLive={onBubblesLive}
+          onBubblesCommit={onBubblesCommit}
         />
       ))}
     </div>
@@ -743,12 +770,22 @@ const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 // image pans that crop by adjusting object-position — this tracks the drag in pixels,
 // converts it to a percentage of how far the rendered image overflows the frame in each
 // axis, and only treats it as a "select this panel" click if the pointer never moved.
-function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragImageEnd }) {
+function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragImageEnd, onBubblesLive, onBubblesCommit }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
   const dragRef = useRef(null);
 
   const offset = panel.imageOffset || { x: 50, y: 50 };
+  const bubbles = panel.bubbles || [];
+
+  const updateBubble = (bubbleId, patch, { commit }) => {
+    const next = bubbles.map((b) => (b.id === bubbleId ? { ...b, ...patch } : b));
+    (commit ? onBubblesCommit : onBubblesLive)(panel.id, next);
+  };
+
+  const deleteBubble = (bubbleId) => {
+    onBubblesCommit(panel.id, bubbles.filter((b) => b.id !== bubbleId));
+  };
 
   const onPointerDown = (e) => {
     if (!panel.imageAssetId || e.button !== 0) return;
@@ -820,11 +857,35 @@ function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragIm
           Click to set up panel {panel.order + 1}
         </span>
       )}
+
+      {bubbles.map((bubble) => (
+        <Bubble
+          key={bubble.id}
+          bubble={bubble}
+          containerRef={containerRef}
+          editable={selected}
+          onChange={(patch, opts) => updateBubble(bubble.id, patch, opts)}
+          onDelete={() => deleteBubble(bubble.id)}
+        />
+      ))}
     </div>
   );
 }
 
-function PanelEditor({ projectId, page, panel, characters, places, objects, allPanels, onClose, onUpdated, onDelete }) {
+function PanelEditor({
+  projectId,
+  page,
+  panel,
+  characters,
+  places,
+  objects,
+  allPanels,
+  onClose,
+  onUpdated,
+  onDelete,
+  onAddBubble,
+  onCommitBubbles,
+}) {
   const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -842,6 +903,18 @@ function PanelEditor({ projectId, page, panel, characters, places, objects, allP
     }
   };
 
+  const bubbles = panel.bubbles || [];
+  const setBubbleShape = (bubbleId, shape) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, shape } : b)));
+  };
+  const toggleBubbleTail = (bubble) => {
+    const tail = bubble.tail ? null : defaultTailFor(bubble);
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubble.id ? { ...b, tail } : b)));
+  };
+  const removeBubble = (bubbleId) => {
+    onCommitBubbles(panel.id, bubbles.filter((b) => b.id !== bubbleId));
+  };
+
   return (
     <div className="panel-editor">
       <div className="panel-editor-header">
@@ -854,7 +927,7 @@ function PanelEditor({ projectId, page, panel, characters, places, objects, allP
         </div>
       </div>
 
-      <section className="scene-editor-section">
+      <section className="panel-editor-upper">
         <h4>Scene description</h4>
         <p className="scene-editor-hint">
           Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
@@ -873,13 +946,51 @@ function PanelEditor({ projectId, page, panel, characters, places, objects, allP
         {characters.length === 0 && places.length === 0 && objects.length === 0 && (
           <p className="empty-hint">Add characters, places, or objects in the sidebar first.</p>
         )}
+
+        {error && <p className="error">{error}</p>}
+
+        <button className="primary" onClick={generate} disabled={busy}>
+          {busy ? "Generating…" : panel.imageAssetId ? "Regenerate panel" : "Generate panel"}
+        </button>
       </section>
 
-      {error && <p className="error">{error}</p>}
+      <section className="panel-editor-lower">
+        <h4>Speech bubbles</h4>
+        <p className="scene-editor-hint">
+          On the panel itself: drag a bubble to move it, its corner to resize, and the small
+          dot to aim its tail. Double-click to edit its text. Pick each bubble's shape — and
+          whether it has a tail at all, for narration/caption boxes — here.
+        </p>
+        <button className="primary" onClick={() => onAddBubble(panel.id)}>
+          + Add speech bubble
+        </button>
 
-      <button className="primary" onClick={generate} disabled={busy}>
-        {busy ? "Generating…" : panel.imageAssetId ? "Regenerate panel" : "Generate panel"}
-      </button>
+        <div className="bubble-list">
+          {bubbles.map((b, i) => (
+            <div className="bubble-list-row" key={b.id}>
+              <span className="bubble-list-label">{b.text?.trim() ? b.text.trim().slice(0, 24) : `Bubble ${i + 1}`}</span>
+              <div className="bubble-list-shapes">
+                {SHAPES.map((s) => (
+                  <button
+                    key={s.value}
+                    className={b.shape === s.value ? "active" : ""}
+                    onClick={() => setBubbleShape(b.id, s.value)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+                <button className={b.tail ? "" : "active"} onClick={() => toggleBubbleTail(b)}>
+                  No tail
+                </button>
+              </div>
+              <button className="delete" onClick={() => removeBubble(b.id)}>
+                ×
+              </button>
+            </div>
+          ))}
+          {bubbles.length === 0 && <p className="empty-hint">No speech bubbles yet.</p>}
+        </div>
+      </section>
     </div>
   );
 }
