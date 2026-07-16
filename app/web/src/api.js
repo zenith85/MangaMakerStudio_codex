@@ -33,6 +33,7 @@ export const api = {
   getPage: (projectId, id) => req(`/projects/${projectId}/pages/${id}`),
   updatePage: (projectId, pageId, body) =>
     req(`/projects/${projectId}/pages/${pageId}`, { method: "PATCH", ...json(body) }),
+  deletePage: (projectId, pageId) => req(`/projects/${projectId}/pages/${pageId}`, { method: "DELETE" }),
 
   updatePanel: (projectId, pageId, panelId, body) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "PATCH", ...json(body) }),

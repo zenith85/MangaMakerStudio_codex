@@ -224,6 +224,17 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) 
   res.json(page);
 });
 
+app.delete("/api/projects/:projectId/pages/:pageId", (req, res) => {
+  const { projectId, pageId } = req.params;
+  const pages = listPages(projectId);
+  const page = pages.find((p) => p.id === pageId);
+  if (!page) return res.status(404).json({ error: "page not found" });
+
+  for (const panel of page.panels) deletePanelAsset(panel);
+  savePages(projectId, pages.filter((p) => p.id !== pageId));
+  res.json({ ok: true });
+});
+
 // Changes a page's layout. `panelCount` comes from the frontend's chosen layout
 // template, same as page creation. Growing appends empty panels; shrinking drops
 // panels from the end (and their generated images) — the frontend is expected to

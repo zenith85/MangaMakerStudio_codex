@@ -182,6 +182,21 @@ export default function App() {
     setCurrentPage(page);
   };
 
+  const deletePage = async (pageId) => {
+    const target = pages.find((p) => p.id === pageId);
+    if (!target) return;
+    const withContent = target.panels.filter(panelHasContent).length;
+    const detail = withContent > 0 ? ` — ${withContent} panel(s) have a generated image or scene text` : "";
+    if (!window.confirm(`Delete "${target.title}" and all its panels${detail}? This can't be undone.`)) return;
+
+    await api.deletePage(currentProjectId, pageId);
+    setPages((prev) => prev.filter((p) => p.id !== pageId));
+    if (currentPage?.id === pageId) {
+      setCurrentPage(null);
+      setSelectedPanelId(null);
+    }
+  };
+
   // Switching to a layout with fewer panels drops the trailing ones (grid position
   // comes from array order — see PageCanvas), so warn first if any would be lost.
   const changeLayout = async (layoutValue) => {
@@ -302,6 +317,7 @@ export default function App() {
           onOpen={openPage}
           onCreate={createPage}
           onChangeLayout={changeLayout}
+          onDelete={deletePage}
         />
         {currentPage ? (
           <PageCanvas
@@ -599,7 +615,7 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   );
 }
 
-function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout }) {
+function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [showLayoutPicker, setShowLayoutPicker] = useState(false);
   const [title, setTitle] = useState("");
@@ -632,7 +648,12 @@ function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout }) {
       </select>
       <button onClick={() => setShowForm((v) => !v)}>+ New page</button>
       {currentPage && (
-        <button onClick={() => setShowLayoutPicker((v) => !v)}>Change layout</button>
+        <>
+          <button onClick={() => setShowLayoutPicker((v) => !v)}>Change layout</button>
+          <button className="delete-page" onClick={() => onDelete(currentPage.id)}>
+            Delete page
+          </button>
+        </>
       )}
 
       {showForm && (
