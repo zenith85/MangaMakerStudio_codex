@@ -74,6 +74,14 @@ that restriction without adding real authentication in its place.
 - `app/server/uploads/` — legacy generated panel renders.
 - `node_modules/`, `app/web/dist/` — installable/rebuildable, not source.
 
+## Fonts
+
+Speech bubble text can use one of five free fonts, self-hosted under
+`app/web/public/fonts/` (rather than a CDN) so bubbles render the same
+offline: Bangers, Comic Neue, and Reggae One (SIL Open Font License), and
+Permanent Marker (Apache License 2.0). Shojumaru is also SIL OFL. Full
+license texts are in `app/web/public/fonts/LICENSES/`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

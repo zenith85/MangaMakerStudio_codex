@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
-import Bubble, { newBubble, SHAPES, defaultTailFor } from "./Bubble";
+import Bubble, { newBubble, FONTS, defaultTailFor } from "./Bubble";
+import ShapePicker from "./ShapePicker";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
 // in order, so a layout's look comes entirely from its grid-template — no
@@ -577,7 +578,7 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   };
 
   return (
-    <div className="modal-backdrop">
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal entity-modal">
         <div className="panel-editor-header">
           <h2>{entity ? entity.name : `New ${singular}`}</h2>
@@ -646,6 +647,16 @@ function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelet
   const [title, setTitle] = useState("");
   const [layout, setLayout] = useState("grid-2x2");
   const [stylePreset, setStylePreset] = useState("manga_bw");
+  const layoutPickerRef = useRef(null);
+
+  useEffect(() => {
+    if (!showLayoutPicker) return;
+    const onDocPointerDown = (e) => {
+      if (layoutPickerRef.current && !layoutPickerRef.current.contains(e.target)) setShowLayoutPicker(false);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [showLayoutPicker]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -673,12 +684,19 @@ function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelet
       </select>
       <button onClick={() => setShowForm((v) => !v)}>+ New page</button>
       {currentPage && (
-        <>
+        <div className="layout-picker-wrap" ref={layoutPickerRef}>
           <button onClick={() => setShowLayoutPicker((v) => !v)}>Change layout</button>
-          <button className="delete-page" onClick={() => onDelete(currentPage.id)}>
-            Delete page
-          </button>
-        </>
+          {showLayoutPicker && (
+            <div className="layout-picker-popover">
+              <LayoutPicker value={currentPage.layout} onChange={pickLayout} />
+            </div>
+          )}
+        </div>
+      )}
+      {currentPage && (
+        <button className="delete-page" onClick={() => onDelete(currentPage.id)}>
+          Delete page
+        </button>
       )}
 
       {showForm && (
@@ -694,12 +712,6 @@ function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelet
           </select>
           <button type="submit">Create</button>
         </form>
-      )}
-
-      {showLayoutPicker && currentPage && (
-        <div className="layout-picker-popover">
-          <LayoutPicker value={currentPage.layout} onChange={pickLayout} />
-        </div>
       )}
     </div>
   );
@@ -889,6 +901,7 @@ function PanelEditor({
   const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState("scene");
 
   const generate = async () => {
     setBusy(true);
@@ -907,9 +920,12 @@ function PanelEditor({
   const setBubbleShape = (bubbleId, shape) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, shape } : b)));
   };
-  const toggleBubbleTail = (bubble) => {
-    const tail = bubble.tail ? null : defaultTailFor(bubble);
+  const setBubbleTail = (bubble, wantTail) => {
+    const tail = wantTail ? bubble.tail || defaultTailFor(bubble) : null;
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubble.id ? { ...b, tail } : b)));
+  };
+  const setBubbleFont = (bubbleId, font) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, font } : b)));
   };
   const removeBubble = (bubbleId) => {
     onCommitBubbles(panel.id, bubbles.filter((b) => b.id !== bubbleId));
@@ -927,70 +943,90 @@ function PanelEditor({
         </div>
       </div>
 
-      <section className="panel-editor-upper">
-        <h4>Scene description</h4>
-        <p className="scene-editor-hint">
-          Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
-          highlighted, and its reference image will be used when generating this panel. Type{" "}
-          <strong>@</strong> to mention any panel from any page (e.g. "@Page 1 · Panel 2") to keep
-          its room, decor, and props consistent here.
-        </p>
-        <SceneEditor
-          content={sceneDoc}
-          onChange={setSceneDoc}
-          characters={characters}
-          places={places}
-          objects={objects}
-          panels={allPanels.filter((p) => p.id !== panel.id)}
-        />
-        {characters.length === 0 && places.length === 0 && objects.length === 0 && (
-          <p className="empty-hint">Add characters, places, or objects in the sidebar first.</p>
-        )}
-
-        {error && <p className="error">{error}</p>}
-
-        <button className="primary" onClick={generate} disabled={busy}>
-          {busy ? "Generating…" : panel.imageAssetId ? "Regenerate panel" : "Generate panel"}
+      <div className="tabs panel-editor-tabs">
+        <button className={tab === "scene" ? "active" : ""} onClick={() => setTab("scene")}>
+          Scene
         </button>
-      </section>
-
-      <section className="panel-editor-lower">
-        <h4>Speech bubbles</h4>
-        <p className="scene-editor-hint">
-          On the panel itself: drag a bubble to move it, its corner to resize, and the small
-          dot to aim its tail. Double-click to edit its text. Pick each bubble's shape — and
-          whether it has a tail at all, for narration/caption boxes — here.
-        </p>
-        <button className="primary" onClick={() => onAddBubble(panel.id)}>
-          + Add speech bubble
+        <button className={tab === "bubbles" ? "active" : ""} onClick={() => setTab("bubbles")}>
+          Speech bubbles
         </button>
+      </div>
 
-        <div className="bubble-list">
-          {bubbles.map((b, i) => (
-            <div className="bubble-list-row" key={b.id}>
-              <span className="bubble-list-label">{b.text?.trim() ? b.text.trim().slice(0, 24) : `Bubble ${i + 1}`}</span>
-              <div className="bubble-list-shapes">
-                {SHAPES.map((s) => (
-                  <button
-                    key={s.value}
-                    className={b.shape === s.value ? "active" : ""}
-                    onClick={() => setBubbleShape(b.id, s.value)}
-                  >
-                    {s.label}
+      {tab === "scene" && (
+        <section className="panel-editor-upper">
+          <h4>Scene description</h4>
+          <p className="scene-editor-hint">
+            Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
+            highlighted, and its reference image will be used when generating this panel. Type{" "}
+            <strong>@</strong> to mention any panel from any page (e.g. "@Page 1 · Panel 2") to keep
+            its room, decor, and props consistent here.
+          </p>
+          <SceneEditor
+            content={sceneDoc}
+            onChange={setSceneDoc}
+            characters={characters}
+            places={places}
+            objects={objects}
+            panels={allPanels.filter((p) => p.id !== panel.id)}
+          />
+          {characters.length === 0 && places.length === 0 && objects.length === 0 && (
+            <p className="empty-hint">Add characters, places, or objects in the sidebar first.</p>
+          )}
+
+          {error && <p className="error">{error}</p>}
+
+          <button className="primary" onClick={generate} disabled={busy}>
+            {busy ? "Generating…" : panel.imageAssetId ? "Regenerate panel" : "Generate panel"}
+          </button>
+        </section>
+      )}
+
+      {tab === "bubbles" && (
+        <section className="panel-editor-lower">
+          <p className="scene-editor-hint">
+            On the panel itself: drag a bubble to move it, its corner to resize, and the small
+            dot to aim its tail. Double-click to edit its text. Pick each bubble's shape from
+            the dropdown below, and switch its tail on or off with the toggle next to it.
+          </p>
+          <button className="primary" onClick={() => onAddBubble(panel.id)}>
+            + Add speech bubble
+          </button>
+
+          {bubbles.length > 0 && <h4 className="bubble-list-heading">Your bubbles</h4>}
+          <div className="bubble-list">
+            {bubbles.map((b, i) => (
+              <div className="bubble-list-row" key={b.id}>
+                <div className="bubble-list-row-header">
+                  <span className="bubble-list-label">
+                    {b.text?.trim() ? b.text.trim().slice(0, 90) : `Bubble ${i + 1}`}
+                  </span>
+                  <button className="delete" onClick={() => removeBubble(b.id)}>
+                    ×
                   </button>
-                ))}
-                <button className={b.tail ? "" : "active"} onClick={() => toggleBubbleTail(b)}>
-                  No tail
-                </button>
+                </div>
+                <ShapePicker
+                  bubble={b}
+                  onSetShape={(shape) => setBubbleShape(b.id, shape)}
+                  onSetTail={(wantTail) => setBubbleTail(b, wantTail)}
+                />
+                <select
+                  className="bubble-list-font"
+                  style={{ fontFamily: FONTS.find((f) => f.value === b.font)?.family }}
+                  value={b.font || FONTS[0].value}
+                  onChange={(e) => setBubbleFont(b.id, e.target.value)}
+                >
+                  {FONTS.map((f) => (
+                    <option key={f.value} value={f.value} style={{ fontFamily: f.family }}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <button className="delete" onClick={() => removeBubble(b.id)}>
-                ×
-              </button>
-            </div>
-          ))}
-          {bubbles.length === 0 && <p className="empty-hint">No speech bubbles yet.</p>}
-        </div>
-      </section>
+            ))}
+            {bubbles.length === 0 && <p className="empty-hint">No speech bubbles yet.</p>}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

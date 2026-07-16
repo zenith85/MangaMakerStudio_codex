@@ -1,11 +1,51 @@
 import { useState } from "react";
 
 export const SHAPES = [
-  { value: "oval", label: "Oval" },
-  { value: "rectangle", label: "Rect" },
-  { value: "star", label: "Star" },
-  { value: "thought", label: "Thought" },
+  { value: "speaking", label: "Speaking" },
+  { value: "thinking", label: "Thinking" },
+  { value: "whisper", label: "Whisper" },
+  { value: "yell", label: "Yell" },
+  { value: "scream", label: "Scream" },
+  { value: "harder", label: "Harder!" },
+  { value: "spooky", label: "Spooky" },
+  { value: "digital", label: "Digital" },
+  { value: "dreamy", label: "Dreamy" },
+  { value: "caption", label: "Caption" },
 ];
+
+// Old shape values from before this library expanded — resolved everywhere shape is
+// read, not migrated on disk, so bubbles saved with the old names keep rendering
+// correctly without a data migration.
+const SHAPE_ALIASES = { oval: "speaking", rectangle: "caption", star: "scream", thought: "thinking" };
+export function resolveShape(shape) {
+  return SHAPE_ALIASES[shape] || shape;
+}
+
+// Shapes whose tail is conventionally a chain of shrinking trailing dots rather than a
+// single pointed spike (thought/dreamy bubbles, and the drips on a "spooky" one).
+const DOT_TAIL_SHAPES = new Set(["thinking", "dreamy", "spooky"]);
+export function tailStyleFor(shape) {
+  return DOT_TAIL_SHAPES.has(resolveShape(shape)) ? "dots" : "spike";
+}
+
+const DASHED_SHAPES = new Set(["whisper"]);
+export function isDashed(shape) {
+  return DASHED_SHAPES.has(resolveShape(shape));
+}
+
+// Free (SIL OFL / Apache 2.0), self-hosted under public/fonts — see public/fonts/LICENSES
+// — so bubbles render consistently offline instead of depending on a fonts CDN.
+export const FONTS = [
+  { value: "comicneue", label: "Comic Neue", family: "'Comic Neue', sans-serif" },
+  { value: "bangers", label: "Bangers", family: "'Bangers', cursive" },
+  { value: "permanentmarker", label: "Permanent Marker", family: "'Permanent Marker', cursive" },
+  { value: "shojumaru", label: "Shojumaru", family: "'Shojumaru', cursive" },
+  { value: "reggaeone", label: "Reggae One", family: "'Reggae One', cursive" },
+];
+
+export function fontFamilyFor(fontValue) {
+  return FONTS.find((f) => f.value === fontValue)?.family ?? FONTS[0].family;
+}
 
 // A sensible default tail point when turning a bubble's tail back on — just below its
 // center. Shared so the sidebar's "No tail" toggle (App.jsx) computes the same default
@@ -18,7 +58,8 @@ export function newBubble() {
   return {
     id: crypto.randomUUID(),
     text: "New text",
-    shape: "oval",
+    shape: "speaking",
+    font: "comicneue",
     x: 30,
     y: 10,
     width: 35,
@@ -55,11 +96,9 @@ function rectangleBoundary() {
   ];
 }
 
-// Star and thought are the same "alternating outer/inner radius" construction — star
-// uses a big depth difference for sharp jagged spikes (the classic manga "shout"
-// bubble), thought a shallow one with more, smaller bumps for a scalloped cloud outline
-// (the classic "thinking" bubble) instead of the star's plain 5-point look, which reads
-// as too generic/decorative for that use.
+// A sharp jagged burst — straight edges alternating between an outer and inner radius,
+// so each bump comes to an actual point. Used for scream/harder, which should look
+// spiky, not soft.
 function scallopedBoundary(bumps, outerR, innerR) {
   const pts = [];
   for (let i = 0; i < bumps * 2; i++) {
@@ -70,11 +109,109 @@ function scallopedBoundary(bumps, outerR, innerR) {
   return pts;
 }
 
-function boundaryFor(shape) {
-  if (shape === "rectangle") return rectangleBoundary();
-  if (shape === "star") return scallopedBoundary(12, 50, 32);
-  if (shape === "thought") return scallopedBoundary(16, 50, 42);
-  return ellipseBoundary();
+// A genuine cloud outline: `bumpCount` circles of radius `bumpR`, evenly spaced around
+// a base circle of radius `baseR`, traced along their union's outer edge (for each
+// sampled angle, the farthest point where a ray from center exits any of the circles).
+// A single cosine harmonic instead of this would vary the radius continuously too, but
+// still comes to flower-like cusps between lobes rather than true rounded valleys —
+// this is what real thought/dreamy cloud bubbles actually look like.
+function cloudBoundary(bumpCount, baseR, bumpR, n = 160) {
+  const centers = [];
+  for (let i = 0; i < bumpCount; i++) {
+    const a = (2 * Math.PI * i) / bumpCount;
+    centers.push({ cx: baseR * Math.sin(a), cy: -baseR * Math.cos(a), r: bumpR });
+  }
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    const dx = Math.sin(a);
+    const dy = -Math.cos(a);
+    let maxT = 0;
+    for (const c of centers) {
+      const dot = dx * c.cx + dy * c.cy;
+      const distSq = c.cx * c.cx + c.cy * c.cy;
+      const disc = dot * dot - (distSq - c.r * c.r);
+      if (disc < 0) continue;
+      const t = dot + Math.sqrt(disc);
+      if (t > maxT) maxT = t;
+    }
+    pts.push({ x: 50 + dx * maxT, y: 50 + dy * maxT });
+  }
+  return pts;
+}
+
+// An irregular, hand-drawn-looking wobble for the "spooky" shape — a sum of a few sine
+// harmonics at different frequencies/phases, so it looks organic rather than a
+// perfectly repeating pattern (which scallopedBoundary would give).
+function wobblyBoundary(n = 72) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (2 * Math.PI * i) / n;
+    const r = 50 + 6 * Math.sin(a * 5) + 3 * Math.sin(a * 9 + 1.3) + 2 * Math.sin(a * 13 + 2.7);
+    pts.push({ x: 50 + r * Math.sin(a), y: 50 - r * Math.cos(a) });
+  }
+  return pts;
+}
+
+// A rectangle with small square notches stepped into each edge, for a glitchy
+// "digital" look instead of a plain caption box. Rendered with a miter join (see
+// isSharpCornered) so the steps read as actual right angles, not a soft wave.
+function steppedRectangleBoundary(segmentsPerEdge = 4, notchDepth = 9) {
+  const corners = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ];
+  const pts = [];
+  for (let c = 0; c < 4; c++) {
+    const p1 = corners[c];
+    const p2 = corners[(c + 1) % 4];
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    for (let s = 0; s < segmentsPerEdge; s++) {
+      const t = s / segmentsPerEdge;
+      const bx = p1.x + dx * t;
+      const by = p1.y + dy * t;
+      const step = s % 2 === 1 ? notchDepth : 0;
+      pts.push({ x: bx + nx * step, y: by + ny * step });
+    }
+  }
+  return pts;
+}
+
+export function boundaryFor(shape) {
+  switch (resolveShape(shape)) {
+    case "caption":
+      return rectangleBoundary();
+    case "digital":
+      return steppedRectangleBoundary();
+    case "yell":
+      return scallopedBoundary(9, 50, 36);
+    case "scream":
+      return scallopedBoundary(12, 50, 30);
+    case "harder":
+      return scallopedBoundary(15, 50, 26);
+    case "thinking":
+      return cloudBoundary(7, 26, 24);
+    case "dreamy":
+      return cloudBoundary(5, 20, 28);
+    case "spooky":
+      return wobblyBoundary();
+    default: // speaking, whisper
+      return ellipseBoundary();
+  }
+}
+
+// Sharp/jagged shapes need a miter join so their points and steps read as crisp corners
+// — the round join used everywhere else (so it doesn't look like a rendering glitch on
+// smooth shapes) would blunt them into a soft blob, especially at small preview sizes.
+const SHARP_JOIN_SHAPES = new Set(["yell", "scream", "harder", "digital"]);
+export function isSharpCornered(shape) {
+  return SHARP_JOIN_SHAPES.has(resolveShape(shape));
 }
 
 function normalizeAngle(a) {
@@ -90,7 +227,7 @@ function angleOf(p) {
 // which two consecutive sampled points bracket that angle and interpolating between
 // them. This works for any "star-shaped" boundary — one where every ray from the center
 // crosses it exactly once — which is true of all four bubble shapes here.
-function boundaryPointAtAngle(boundary, angle) {
+export function boundaryPointAtAngle(boundary, angle) {
   const target = normalizeAngle(angle);
   const n = boundary.length;
   for (let i = 0; i < n; i++) {
@@ -113,7 +250,7 @@ function boundaryPointAtAngle(boundary, angle) {
 // Splices the tail directly into the shape's boundary, as a spike inserted right where
 // a ray toward the tail tip crosses the outline — one continuous outline for the whole
 // bubble, tail included, instead of a separate triangle glued behind it.
-function outlineWithTail(boundary, bubble) {
+export function outlineWithTail(boundary, bubble) {
   if (!bubble.tail) return boundary;
 
   const tlx = ((bubble.tail.x - bubble.x) / bubble.width) * 100;
@@ -136,7 +273,28 @@ function outlineWithTail(boundary, bubble) {
   return [...boundary.slice(0, afterIndex + 1), left, tip, right, ...boundary.slice(afterIndex + 1)];
 }
 
-function pointsToString(pts) {
+// Three shrinking dots leading from the bubble's edge to the tail tip — the
+// thought/dreamy/spooky convention, instead of a spike merged into the outline.
+export function dotTrailPoints(boundary, bubble, steps = 3) {
+  if (!bubble.tail) return [];
+  const tlx = ((bubble.tail.x - bubble.x) / bubble.width) * 100;
+  const tly = ((bubble.tail.y - bubble.y) / bubble.height) * 100;
+  const angle = Math.atan2(tly - 50, tlx - 50);
+  const { point: base } = boundaryPointAtAngle(boundary, angle);
+
+  const dots = [];
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    dots.push({
+      x: base.x + (tlx - base.x) * t,
+      y: base.y + (tly - base.y) * t,
+      r: 5 - 3 * t,
+    });
+  }
+  return dots;
+}
+
+export function pointsToString(pts) {
   return pts.map((p) => `${p.x},${p.y}`).join(" ");
 }
 
@@ -248,7 +406,10 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     height: `${bubble.height}%`,
   };
   const boundary = boundaryFor(bubble.shape);
-  const outline = outlineWithTail(boundary, bubble);
+  const tailStyle = tailStyleFor(bubble.shape);
+  const outline = tailStyle === "spike" ? outlineWithTail(boundary, bubble) : boundary;
+  const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
+  const dashed = isDashed(bubble.shape);
 
   return (
     <>
@@ -259,13 +420,22 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
         onDoubleClick={editable ? () => setEditingText(true) : undefined}
       >
         <svg className="bubble-outline" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <polygon points={pointsToString(outline)} vectorEffect="non-scaling-stroke" />
+          <polygon
+            points={pointsToString(outline)}
+            vectorEffect="non-scaling-stroke"
+            strokeDasharray={dashed ? "5 4" : undefined}
+            style={isSharpCornered(bubble.shape) ? { strokeLinejoin: "miter" } : undefined}
+          />
+          {dots.map((d, i) => (
+            <circle key={i} cx={d.x} cy={d.y} r={d.r} vectorEffect="non-scaling-stroke" />
+          ))}
         </svg>
 
         <div className="bubble-text-clip" style={{ clipPath: pointsToClipPath(boundary) }}>
           {editingText ? (
             <textarea
               className="bubble-text-input"
+              style={{ fontFamily: fontFamilyFor(bubble.font) }}
               defaultValue={bubble.text}
               autoFocus
               onPointerDown={(e) => e.stopPropagation()}
@@ -275,7 +445,9 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
               }}
             />
           ) : (
-            <div className="bubble-text">{bubble.text}</div>
+            <div className="bubble-text" style={{ fontFamily: fontFamilyFor(bubble.font) }}>
+              {bubble.text}
+            </div>
           )}
         </div>
 
