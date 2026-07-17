@@ -92,18 +92,27 @@ const LAYOUTS = [
 // named grid area, and a slanted divider between two panels is drawn by giving them
 // the *same* overlapping box with complementary clip-path polygons — each only paints
 // its half of that shared box, with a small inset on both sides of the divider so the
-// gap between them matches the same ~1.5% gutter every other layout uses (without it,
-// tilted panels touch edge-to-edge while every rectangular layout has a visible gap —
-// exactly the "inconsistent spacing" that made the first version look off). A layout
-// using this mode sets `panels` (one {x,y,width,height,clipPath?} per panel, in order)
-// instead of areas/columns/rows; PageCanvas and LayoutPicker check for that to switch
-// rendering modes.
-const GAP = 1.6; // percent of page width/height — matches the grid layouts' 10px/640px gutter
+// gap between them matches the same gutter every other layout uses (without it, tilted
+// panels touch edge-to-edge while every rectangular layout has a visible gap — exactly
+// the "inconsistent spacing" that made earlier versions look off). A layout using this
+// mode sets `panels` (one {x,y,width,height,clipPath?} per panel, in order) instead of
+// areas/columns/rows; PageCanvas and LayoutPicker check for that to switch modes.
+//
+// The page itself isn't square (aspect-ratio 5/7 in CSS), so "1.6% of width" and "1.6%
+// of height" are NOT the same number of pixels — using one flat percent for both axes
+// made vertical gaps visibly wider than horizontal ones. GAP_X/GAP_Y below are each
+// calibrated (given the page's actual pixel width and aspect ratio) so a gap along
+// either axis resolves to the same ~10px the grid layouts use via `gap: 10px`.
+const PAGE_W = 640; // matches .page-canvas max-width
+const PAGE_ASPECT = 5 / 7; // matches .page-canvas aspect-ratio (width / height)
+const GAP_X = (10 / PAGE_W) * 100; // percent of page width for a 10px horizontal gap
+const GAP_Y = GAP_X * PAGE_ASPECT; // percent of page height for that same 10px, vertically
 
 // Two panels sharing the full-width band from y0 to y0+h, split by a divider tilted
-// between (0%, divLeftFrac) and (100%, divRightFrac) within that band.
+// between (0%, divLeftFrac) and (100%, divRightFrac) within that band. The divider runs
+// along the y axis, so its gap is calibrated against page height (GAP_Y).
 function tiltedRow(y0, h, divLeftFrac, divRightFrac) {
-  const g = (GAP / h) * 100; // page-percent gap converted to this band's local percent
+  const g = (GAP_Y / h) * 100; // page-percent gap converted to this band's local percent
   const leftY = divLeftFrac * 100;
   const rightY = divRightFrac * 100;
   return [
@@ -113,9 +122,10 @@ function tiltedRow(y0, h, divLeftFrac, divRightFrac) {
 }
 
 // Same idea, vertical: two panels sharing one box, split by a divider tilted between
-// (divTopFrac, 0%) and (divBottomFrac, 100%).
+// (divTopFrac, 0%) and (divBottomFrac, 100%). The divider runs along the x axis, so its
+// gap is calibrated against page width (GAP_X).
 function tiltedColumn(x0, y0, w, h, divTopFrac, divBottomFrac) {
-  const g = (GAP / w) * 100;
+  const g = (GAP_X / w) * 100;
   const topX = divTopFrac * 100;
   const bottomX = divBottomFrac * 100;
   return [
@@ -126,13 +136,26 @@ function tiltedColumn(x0, y0, w, h, divTopFrac, divBottomFrac) {
 
 // A dramatic diagonal slash across a box, from (topFrac, 0%) to (bottomFrac, 100%).
 function diagonalSplit(x0, y0, w, h, topFrac, bottomFrac) {
-  const g = (GAP / w) * 100;
+  const g = (GAP_X / w) * 100;
   const topX = topFrac * 100;
   const bottomX = bottomFrac * 100;
   return [
     { x: x0, y: y0, width: w, height: h, clipPath: `polygon(0% 0%, ${topX - g / 2}% 0%, ${bottomX - g / 2}% 100%, 0% 100%)` },
     { x: x0, y: y0, width: w, height: h, clipPath: `polygon(${topX + g / 2}% 0%, 100% 0%, 100% 100%, ${bottomX + g / 2}% 100%)` },
   ];
+}
+
+// Lays out a column of full-width bands stacked top to bottom with an exact GAP_Y
+// between every pair, given their relative height weights (e.g. [18, 40, 19, 20]).
+function stackBands(weights) {
+  const totalGap = GAP_Y * (weights.length - 1);
+  const scale = (100 - totalGap) / weights.reduce((a, b) => a + b, 0);
+  let y = 0;
+  return weights.map((w) => {
+    const band = { y0: y, h: w * scale };
+    y += band.h + GAP_Y;
+    return band;
+  });
 }
 
 // The empty-panel placeholder can't just be centered on a panel's full bounding box —
@@ -172,11 +195,15 @@ const DIAGONAL_LAYOUTS = [
     value: "tilt-top-4",
     label: "4 panels — tilted band split + 2 below",
     panelCount: 4,
-    panels: [
-      ...tiltedRow(0, 63, 0.5, 0.5 + 0.16),
-      { x: 0, y: 63 + GAP / 2, width: 50 - GAP / 2, height: 37 - GAP / 2 },
-      { x: 50 + GAP / 2, y: 63 + GAP / 2, width: 50 - GAP / 2, height: 37 - GAP / 2 },
-    ],
+    panels: (() => {
+      const [band, squareRow] = stackBands([63, 37]);
+      const squareW = (100 - GAP_X) / 2;
+      return [
+        ...tiltedRow(band.y0, band.h, 0.5, 0.5 + 0.16),
+        { x: 0, y: squareRow.y0, width: squareW, height: squareRow.h },
+        { x: squareW + GAP_X, y: squareRow.y0, width: squareW, height: squareRow.h },
+      ];
+    })(),
   },
   // One wide panel, then a tilted pair (wide left + narrower right panel), then 2 more
   // wide panels stacked below.
@@ -184,12 +211,15 @@ const DIAGONAL_LAYOUTS = [
     value: "diagonal-slice-5",
     label: "5 panels — wide top + diagonal + 2 wide",
     panelCount: 5,
-    panels: [
-      { x: 0, y: 0, width: 100, height: 18 - GAP / 2 },
-      ...tiltedColumn(0, 18 + GAP / 2, 100, 40 - GAP, 0.72, 0.6),
-      { x: 0, y: 60, width: 100, height: 19 - GAP / 2 },
-      { x: 0, y: 80 + GAP / 2, width: 100, height: 20 - GAP },
-    ],
+    panels: (() => {
+      const [top, column, row3, row4] = stackBands([18, 40, 19, 20]);
+      return [
+        { x: 0, y: top.y0, width: 100, height: top.h },
+        ...tiltedColumn(0, column.y0, 100, column.h, 0.72, 0.6),
+        { x: 0, y: row3.y0, width: 100, height: row3.h },
+        { x: 0, y: row4.y0, width: 100, height: row4.h },
+      ];
+    })(),
   },
   // A simple, dramatic full-page diagonal split into 2 panels.
   {
