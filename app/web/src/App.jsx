@@ -86,6 +86,132 @@ const LAYOUTS = [
   },
 ];
 
+// CSS Grid can only ever produce rectangular cells, so the tilted/diagonal panel
+// borders in real manga pages need a different technique: panels are positioned
+// freehand (percent x/y/width/height, like a speech bubble) rather than placed in a
+// named grid area, and a slanted divider between two panels is drawn by giving them
+// the *same* overlapping box with complementary clip-path polygons — each only paints
+// its half of that shared box, with a small inset on both sides of the divider so the
+// gap between them matches the same ~1.5% gutter every other layout uses (without it,
+// tilted panels touch edge-to-edge while every rectangular layout has a visible gap —
+// exactly the "inconsistent spacing" that made the first version look off). A layout
+// using this mode sets `panels` (one {x,y,width,height,clipPath?} per panel, in order)
+// instead of areas/columns/rows; PageCanvas and LayoutPicker check for that to switch
+// rendering modes.
+const GAP = 1.6; // percent of page width/height — matches the grid layouts' 10px/640px gutter
+
+// Two panels sharing the full-width band from y0 to y0+h, split by a divider tilted
+// between (0%, divLeftFrac) and (100%, divRightFrac) within that band.
+function tiltedRow(y0, h, divLeftFrac, divRightFrac) {
+  const g = (GAP / h) * 100; // page-percent gap converted to this band's local percent
+  const leftY = divLeftFrac * 100;
+  const rightY = divRightFrac * 100;
+  return [
+    { x: 0, y: y0, width: 100, height: h, clipPath: `polygon(0% 0%, 100% 0%, 100% ${rightY - g / 2}%, 0% ${leftY - g / 2}%)` },
+    { x: 0, y: y0, width: 100, height: h, clipPath: `polygon(0% ${leftY + g / 2}%, 100% ${rightY + g / 2}%, 100% 100%, 0% 100%)` },
+  ];
+}
+
+// Same idea, vertical: two panels sharing one box, split by a divider tilted between
+// (divTopFrac, 0%) and (divBottomFrac, 100%).
+function tiltedColumn(x0, y0, w, h, divTopFrac, divBottomFrac) {
+  const g = (GAP / w) * 100;
+  const topX = divTopFrac * 100;
+  const bottomX = divBottomFrac * 100;
+  return [
+    { x: x0, y: y0, width: w, height: h, clipPath: `polygon(0% 0%, ${topX - g / 2}% 0%, ${bottomX - g / 2}% 100%, 0% 100%)` },
+    { x: x0, y: y0, width: w, height: h, clipPath: `polygon(${topX + g / 2}% 0%, 100% 0%, 100% 100%, ${bottomX + g / 2}% 100%)` },
+  ];
+}
+
+// A dramatic diagonal slash across a box, from (topFrac, 0%) to (bottomFrac, 100%).
+function diagonalSplit(x0, y0, w, h, topFrac, bottomFrac) {
+  const g = (GAP / w) * 100;
+  const topX = topFrac * 100;
+  const bottomX = bottomFrac * 100;
+  return [
+    { x: x0, y: y0, width: w, height: h, clipPath: `polygon(0% 0%, ${topX - g / 2}% 0%, ${bottomX - g / 2}% 100%, 0% 100%)` },
+    { x: x0, y: y0, width: w, height: h, clipPath: `polygon(${topX + g / 2}% 0%, 100% 0%, 100% 100%, ${bottomX + g / 2}% 100%)` },
+  ];
+}
+
+// The empty-panel placeholder can't just be centered on a panel's full bounding box —
+// for a tilted/diagonal slot two panels share the same box, so the box's own center is
+// often outside (or right on the seam of) the actual visible clipped shape. This finds
+// the true centroid of the clip-path polygon so the placeholder lands inside the shape
+// a user actually sees.
+function polygonCentroid(clipPath) {
+  const match = clipPath.match(/polygon\(([^)]+)\)/);
+  if (!match) return { x: 50, y: 50 };
+  const pts = match[1].split(",").map((pair) => pair.trim().split(/\s+/).map((v) => parseFloat(v)));
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[(i + 1) % pts.length];
+    const cross = x0 * y1 - x1 * y0;
+    area += cross;
+    cx += (x0 + x1) * cross;
+    cy += (y0 + y1) * cross;
+  }
+  area /= 2;
+  if (Math.abs(area) < 1e-6) {
+    const n = pts.length;
+    return { x: pts.reduce((s, p) => s + p[0], 0) / n, y: pts.reduce((s, p) => s + p[1], 0) / n };
+  }
+  return { x: cx / (6 * area), y: cy / (6 * area) };
+}
+
+const DIAGONAL_LAYOUTS = [
+  // A tilted band across the top (split into 2 panels by a diagonal seam), then 2
+  // squares below. panelCount must match panels.length exactly — PageCanvas and
+  // LayoutPicker both index into `panels` by array position, so an undercount here
+  // silently drops the last slot entirely instead of erroring.
+  {
+    value: "tilt-top-4",
+    label: "4 panels — tilted band split + 2 below",
+    panelCount: 4,
+    panels: [
+      ...tiltedRow(0, 63, 0.5, 0.5 + 0.16),
+      { x: 0, y: 63 + GAP / 2, width: 50 - GAP / 2, height: 37 - GAP / 2 },
+      { x: 50 + GAP / 2, y: 63 + GAP / 2, width: 50 - GAP / 2, height: 37 - GAP / 2 },
+    ],
+  },
+  // One wide panel, then a tilted pair (wide left + narrower right panel), then 2 more
+  // wide panels stacked below.
+  {
+    value: "diagonal-slice-5",
+    label: "5 panels — wide top + diagonal + 2 wide",
+    panelCount: 5,
+    panels: [
+      { x: 0, y: 0, width: 100, height: 18 - GAP / 2 },
+      ...tiltedColumn(0, 18 + GAP / 2, 100, 40 - GAP, 0.72, 0.6),
+      { x: 0, y: 60, width: 100, height: 19 - GAP / 2 },
+      { x: 0, y: 80 + GAP / 2, width: 100, height: 20 - GAP },
+    ],
+  },
+  // A simple, dramatic full-page diagonal split into 2 panels.
+  {
+    value: "diagonal-2",
+    label: "2 panels — diagonal slash",
+    panelCount: 2,
+    panels: diagonalSplit(0, 0, 100, 100, 0.62, 0.38),
+  },
+  // Pure rectangles, no tilt at all — top 2 squares, a tall left panel running the rest
+  // of the page's height, and a smaller panel + a wide bar stacked on the right.
+  {
+    value: "grid-mixed-5",
+    label: "5 panels — 2 top + tall left + 2 right",
+    panelCount: 5,
+    areas: `"p1 p2" "p3 p4" "p3 p5"`,
+    columns: "1fr 1fr",
+    rows: "0.75fr 1.3fr 0.85fr",
+  },
+];
+
+LAYOUTS.push(...DIAGONAL_LAYOUTS);
+
 const STYLE_PRESETS = [
   { value: "manga_bw", label: "Manga (B&W, screentone detail)" },
   { value: "manga_simple", label: "Manga (B&W, simple/clean)" },
@@ -905,11 +1031,26 @@ function LayoutPicker({ value, onChange }) {
         >
           <div
             className="layout-preview"
-            style={{ gridTemplateAreas: l.areas, gridTemplateColumns: l.columns, gridTemplateRows: l.rows }}
+            style={l.panels ? undefined : { gridTemplateAreas: l.areas, gridTemplateColumns: l.columns, gridTemplateRows: l.rows }}
           >
-            {Array.from({ length: l.panelCount }, (_, i) => (
-              <div key={i} className="layout-preview-panel" style={{ gridArea: `p${i + 1}` }} />
-            ))}
+            {Array.from({ length: l.panelCount }, (_, i) =>
+              l.panels ? (
+                <div
+                  key={i}
+                  className="layout-preview-panel"
+                  style={{
+                    position: "absolute",
+                    left: `${l.panels[i].x}%`,
+                    top: `${l.panels[i].y}%`,
+                    width: `${l.panels[i].width}%`,
+                    height: `${l.panels[i].height}%`,
+                    clipPath: l.panels[i].clipPath,
+                  }}
+                />
+              ) : (
+                <div key={i} className="layout-preview-panel" style={{ gridArea: `p${i + 1}` }} />
+              )
+            )}
           </div>
           <span className="layout-option-label">{l.panelCount}p</span>
         </button>
@@ -929,30 +1070,38 @@ function PageCanvas({
   onBubblesCommit,
 }) {
   const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
+  const isFreeform = !!template.panels;
 
   return (
     <div
       ref={containerRef}
       className="page-canvas"
-      style={{
-        gridTemplateAreas: template.areas,
-        gridTemplateColumns: template.columns,
-        gridTemplateRows: template.rows,
-      }}
+      style={
+        isFreeform
+          ? undefined
+          : { gridTemplateAreas: template.areas, gridTemplateColumns: template.columns, gridTemplateRows: template.rows }
+      }
     >
-      {page.panels.map((panel, i) => (
-        <PanelThumb
-          key={panel.id}
-          panel={panel}
-          selected={panel.id === selectedPanelId}
-          gridArea={`p${i + 1}`}
-          onSelect={onSelect}
-          onDragImage={onDragImage}
-          onDragImageEnd={onDragImageEnd}
-          onBubblesLive={onBubblesLive}
-          onBubblesCommit={onBubblesCommit}
-        />
-      ))}
+      {page.panels.map((panel, i) => {
+        const slot = isFreeform ? template.panels[i] : null;
+        const slotStyle = isFreeform
+          ? { position: "absolute", left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%` }
+          : { gridArea: `p${i + 1}` };
+        return (
+          <PanelThumb
+            key={panel.id}
+            panel={panel}
+            selected={panel.id === selectedPanelId}
+            slotStyle={slotStyle}
+            clipPath={slot?.clipPath}
+            onSelect={onSelect}
+            onDragImage={onDragImage}
+            onDragImageEnd={onDragImageEnd}
+            onBubblesLive={onBubblesLive}
+            onBubblesCommit={onBubblesCommit}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -964,13 +1113,29 @@ const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 // image pans that crop by adjusting object-position — this tracks the drag in pixels,
 // converts it to a percentage of how far the rendered image overflows the frame in each
 // axis, and only treats it as a "select this panel" click if the pointer never moved.
-function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragImageEnd, onBubblesLive, onBubblesCommit }) {
+function PanelThumb({
+  panel,
+  selected,
+  slotStyle,
+  clipPath,
+  onSelect,
+  onDragImage,
+  onDragImageEnd,
+  onBubblesLive,
+  onBubblesCommit,
+}) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
   const dragRef = useRef(null);
 
   const offset = panel.imageOffset || { x: 50, y: 50 };
   const bubbles = panel.bubbles || [];
+  const placeholderStyle = clipPath
+    ? (() => {
+        const c = polygonCentroid(clipPath);
+        return { position: "absolute", left: `${c.x}%`, top: `${c.y}%`, transform: "translate(-50%, -50%)" };
+      })()
+    : undefined;
 
   const updateBubble = (bubbleId, patch, { commit }) => {
     const next = bubbles.map((b) => (b.id === bubbleId ? { ...b, ...patch } : b));
@@ -1035,22 +1200,29 @@ function PanelThumb({ panel, selected, gridArea, onSelect, onDragImage, onDragIm
     <div
       ref={containerRef}
       className={`panel-slot ${selected ? "selected" : ""} ${panel.imageAssetId ? "has-image" : ""}`}
-      style={{ gridArea }}
+      style={clipPath ? { ...slotStyle, clipPath } : slotStyle}
       onPointerDown={onPointerDown}
     >
-      {panel.imageAssetId ? (
-        <img
-          ref={imgRef}
-          src={`/uploads/${panel.imageAssetId}.png`}
-          alt=""
-          draggable={false}
-          style={{ objectPosition: `${offset.x}% ${offset.y}%` }}
-        />
-      ) : (
-        <span className="placeholder" onClick={() => onSelect(panel.id)}>
-          Click to set up panel {panel.order + 1}
-        </span>
-      )}
+      {/* clip-path also goes on the OUTER panel-slot (not just the inner image layer
+          below) for tilted/diagonal layouts — two panels there share an identical
+          bounding box, and without clipping the outer element too, clicks in one
+          panel's visible area can hit-test against its neighbor's unclipped box
+          instead, since that's what actually captures the pointer event. */}
+      <div className="panel-slot-image-layer" style={clipPath ? { clipPath } : undefined}>
+        {panel.imageAssetId ? (
+          <img
+            ref={imgRef}
+            src={`/uploads/${panel.imageAssetId}.png`}
+            alt=""
+            draggable={false}
+            style={{ objectPosition: `${offset.x}% ${offset.y}%` }}
+          />
+        ) : (
+          <span className="placeholder" style={placeholderStyle} onClick={() => onSelect(panel.id)}>
+            Click to set up panel {panel.order + 1}
+          </span>
+        )}
+      </div>
 
       {bubbles.map((bubble) => (
         <Bubble
