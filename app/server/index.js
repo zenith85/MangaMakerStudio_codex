@@ -311,6 +311,40 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", (req,
   res.json(panel);
 });
 
+// Reveals a panel's saved image file in the host's native file manager. macOS/Windows can
+// select the specific file; xdg-open has no universal cross-file-manager way to do that,
+// so Linux just opens the containing uploads folder. Same execFile-only, path-must-stay-
+// inside-the-safe-root approach as /projects/:id/open-folder above — imageAssetId comes
+// from the panel we already looked up server-side, never taken raw from the request, but
+// the containment check stays as defense in depth.
+app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/open-image", (req, res) => {
+  const { projectId, pageId, panelId } = req.params;
+  const { panel } = findPanel(projectId, pageId, panelId);
+  if (!panel) return res.status(404).json({ error: "panel not found" });
+  if (!panel.imageAssetId) return res.status(404).json({ error: "panel has no image" });
+
+  const filePath = path.resolve(path.join(UPLOAD_DIR, `${panel.imageAssetId}.png`));
+  if (!filePath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
+    return res.status(400).json({ error: "invalid image id" });
+  }
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "image file missing" });
+
+  if (process.platform === "darwin") {
+    execFile("open", ["-R", filePath], (err) => {
+      if (err) console.error("open-image: failed to launch open:", err.message);
+    });
+  } else if (process.platform === "win32") {
+    execFile("explorer", [`/select,${filePath}`], (err) => {
+      if (err) console.error("open-image: failed to launch explorer:", err.message);
+    });
+  } else {
+    execFile("xdg-open", [UPLOAD_DIR], (err) => {
+      if (err) console.error("open-image: failed to launch xdg-open:", err.message);
+    });
+  }
+  res.json({ ok: true, path: filePath });
+});
+
 function slugifyPageTitle(title) {
   const slug = (title || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   return slug || "page";

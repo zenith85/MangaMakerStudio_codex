@@ -46,6 +46,8 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/image`, { method: "POST", body: formData }),
   clearPanelImage: (projectId, pageId, panelId) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/image`, { method: "DELETE" }),
+  openPanelImage: (projectId, pageId, panelId) =>
+    req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/open-image`, { method: "POST" }),
   savePagePdf: (projectId, pageId, formData) =>
     req(`/projects/${projectId}/pages/${pageId}/pdf`, { method: "POST", body: formData }),
 };

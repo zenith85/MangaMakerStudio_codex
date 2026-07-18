@@ -1443,6 +1443,7 @@ function PanelEditor({
   const [error, setError] = useState("");
   const [tab, setTab] = useState("scene");
   const [imageBusy, setImageBusy] = useState(false);
+  const fileInputRef = useRef(null);
   const [imageError, setImageError] = useState("");
 
   const generate = async () => {
@@ -1471,6 +1472,21 @@ function PanelEditor({
     } finally {
       setImageBusy(false);
     }
+  };
+
+  const openImageLocation = async () => {
+    setImageError("");
+    try {
+      await api.openPanelImage(projectId, page.id, panel.id);
+    } catch (err) {
+      setImageError(err.message);
+    }
+  };
+
+  const onImageDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("image/")) uploadImage(file);
   };
 
   const clearImage = async () => {
@@ -1535,17 +1551,45 @@ function PanelEditor({
           </p>
 
           {panel.imageAssetId ? (
-            <img className="panel-image-preview" src={`/uploads/${panel.imageAssetId}.png`} alt="" />
+            <img
+              className="panel-image-preview"
+              src={`/uploads/${panel.imageAssetId}.png`}
+              alt=""
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onImageDrop}
+            />
           ) : (
-            <div className="panel-image-preview panel-image-preview-empty">No image yet</div>
+            <div
+              className="panel-image-preview panel-image-preview-empty"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onImageDrop}
+            >
+              Drop an image here, or choose one below
+            </div>
           )}
 
-          <input
-            type="file"
-            accept="image/*"
-            disabled={imageBusy}
-            onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
-          />
+          <div className="panel-image-actions">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              disabled={imageBusy}
+              onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
+              hidden
+            />
+            <button
+              className="panel-image-action-btn"
+              onClick={() => fileInputRef.current.click()}
+              disabled={imageBusy}
+            >
+              Choose file
+            </button>
+            {panel.imageAssetId && (
+              <button className="panel-image-action-btn" onClick={openImageLocation}>
+                Open image location
+              </button>
+            )}
+          </div>
 
           {imageError && <p className="error">{imageError}</p>}
 

@@ -474,20 +474,29 @@ button {
   object-fit: cover;
 }
 
+/* Same overlay-icon-button convention as .project-card-delete — circular, borderless,
+   translucent-dark until hovered, then solid. Blue instead of red since these aren't
+   destructive actions. */
 .panel-rotate-btn,
 .panel-resize-btn {
   position: absolute;
   top: 6px;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  border: 1px solid #444;
-  background: rgba(20, 20, 24, 0.7);
-  color: #fff;
-  font-size: 15px;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #e8e8ec;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
   z-index: 5;
+}
+
+.panel-rotate-btn:hover,
+.panel-resize-btn:hover {
+  background: #4a5cff;
+  color: white;
 }
 
 .panel-rotate-btn {
@@ -495,7 +504,7 @@ button {
 }
 
 .panel-resize-btn {
-  right: 40px;
+  right: 34px;
 }
 
 .panel-slot.has-image {
@@ -1156,6 +1165,36 @@ button.primary:disabled {
   background: #22232b;
   color: #666;
   font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.panel-image-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Same look as .open-folder-button — the sidebar's established secondary-action style —
+   minus its width: 100%, since these two sit side by side instead of stacked. */
+.panel-image-action-btn {
+  background: #26272f;
+  border: 1px solid #34353f;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.panel-image-action-btn:hover {
+  border-color: #4a5cff;
+  color: #e8e8ec;
+}
+
+.panel-image-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .image-clear-button {
