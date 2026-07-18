@@ -884,78 +884,80 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
           <button onClick={onClose}>Close</button>
         </div>
 
-        <section className="entity-image-section">
-          <h4>Picture</h4>
-          <div className="tabs entity-image-tabs">
-            <button className={imageTab === "create" ? "active" : ""} onClick={() => setImageTab("create")}>
-              Create
-            </button>
-            <button className={imageTab === "generate" ? "active" : ""} onClick={() => setImageTab("generate")}>
-              Generate
-            </button>
-          </div>
+        <div className="entity-modal-body">
+          <section className="entity-info-section">
+            <h4>Name</h4>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
 
-          {entity?.imageUrl ? (
-            <img className="entity-preview" src={entity.imageUrl} alt={entity.name} />
-          ) : (
-            <div className="entity-preview entity-preview-empty">No image yet</div>
-          )}
+            <h4>Description</h4>
+            <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
 
-          {imageTab === "create" ? (
-            <>
-              <p className="scene-editor-hint">Browse for a picture on your computer and use it directly.</p>
-              <input
-                type="file"
-                accept="image/*"
-                disabled={busy}
-                onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
-              />
-            </>
-          ) : (
-            <>
-              <p className="scene-editor-hint">
-                Uses the name, description, and details below to generate a picture via Codex.
-              </p>
-              <button className="primary" onClick={generate} disabled={busy || !entity}>
-                {busy ? "Generating…" : entity?.imageUrl ? "Redraw" : "Generate"}
+            <h4>Details</h4>
+            <FieldsEditor fields={fields} onChange={setFields} />
+
+            <h4>Style</h4>
+            <select value={style} onChange={(e) => setStyle(e.target.value)}>
+              {STYLE_PRESETS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+
+            {error && <p className="error">{error}</p>}
+
+            <button className="primary" onClick={saveDetails} disabled={busy || !name.trim()}>
+              {busy ? "Saving…" : entity ? "Save changes" : "Create"}
+            </button>
+
+            {entity && (
+              <button className="delete-entity" onClick={remove}>
+                Delete {singular}
               </button>
-            </>
-          )}
+            )}
+          </section>
 
-          {!entity && <p className="empty-hint">Save the details below first, then come back here.</p>}
-        </section>
+          <section className="entity-image-section">
+            <h4>Picture</h4>
+            <div className="tabs entity-image-tabs">
+              <button className={imageTab === "create" ? "active" : ""} onClick={() => setImageTab("create")}>
+                Create
+              </button>
+              <button className={imageTab === "generate" ? "active" : ""} onClick={() => setImageTab("generate")}>
+                Generate
+              </button>
+            </div>
 
-        <section className="entity-info-section">
-          <h4>Name</h4>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
+            {entity?.imageUrl ? (
+              <img className="entity-preview" src={entity.imageUrl} alt={entity.name} />
+            ) : (
+              <div className="entity-preview entity-preview-empty">No image yet</div>
+            )}
 
-          <h4>Description</h4>
-          <textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+            {imageTab === "create" ? (
+              <>
+                <p className="scene-editor-hint">Browse for a picture on your computer and use it directly.</p>
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={busy}
+                  onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
+                />
+              </>
+            ) : (
+              <>
+                <p className="scene-editor-hint">
+                  Uses the name, description, and details below to generate a picture via Codex.
+                </p>
+                <button className="primary" onClick={generate} disabled={busy || !entity}>
+                  {busy ? "Generating…" : entity?.imageUrl ? "Redraw" : "Generate"}
+                </button>
+              </>
+            )}
 
-          <h4>Details</h4>
-          <FieldsEditor fields={fields} onChange={setFields} />
-
-          <h4>Style</h4>
-          <select value={style} onChange={(e) => setStyle(e.target.value)}>
-            {STYLE_PRESETS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-
-          {error && <p className="error">{error}</p>}
-
-          <button className="primary" onClick={saveDetails} disabled={busy || !name.trim()}>
-            {busy ? "Saving…" : entity ? "Save changes" : "Create"}
-          </button>
-
-          {entity && (
-            <button className="delete-entity" onClick={remove}>
-              Delete {singular}
-            </button>
-          )}
-        </section>
+            {!entity && <p className="empty-hint">Save the details below first, then come back here.</p>}
+          </section>
+        </div>
       </div>
     </div>
   );

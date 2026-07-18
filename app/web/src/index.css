@@ -1019,10 +1019,17 @@ button.primary:disabled {
 }
 
 .entity-modal {
-  width: 460px;
-  max-height: 85vh;
+  width: 780px;
+  max-width: 94vw;
+  max-height: 88vh;
   overflow-y: auto;
   text-align: left;
+}
+
+.entity-modal-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
 }
 
 .entity-modal section {
@@ -1047,9 +1054,21 @@ button.primary:disabled {
   width: 100%;
 }
 
+.entity-info-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.entity-info-section textarea {
+  min-height: 130px;
+  resize: vertical;
+}
+
 .entity-image-section {
-  border-bottom: 1px solid #2a2b33;
-  padding-bottom: 16px;
+  width: 260px;
+  flex-shrink: 0;
+  border-left: 1px solid #2a2b33;
+  padding-left: 20px;
 }
 
 .entity-image-tabs {
@@ -1062,6 +1081,20 @@ button.primary:disabled {
 
 .entity-info-section .fields-editor {
   margin-bottom: 4px;
+}
+
+@media (max-width: 700px) {
+  .entity-modal-body {
+    flex-direction: column;
+  }
+
+  .entity-image-section {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #2a2b33;
+    padding-left: 0;
+    padding-top: 16px;
+  }
 }
 
 .entity-preview {
