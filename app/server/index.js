@@ -22,6 +22,11 @@ import {
   entityImageUrl,
   listPages,
   savePages,
+  savePanelImage,
+  loadPanelImage,
+  deletePanelImage,
+  panelImageInfo,
+  panelImagePath,
 } from "./store.js";
 import { generateImageViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt } from "./prompt.js";
@@ -40,6 +45,18 @@ const ENTITY_KINDS = ["characters", "places", "objects"];
 
 function withEntityUrl(projectId, kind, entity) {
   return { ...entity, imageUrl: entity.hasImage ? entityImageUrl(projectId, kind, entity.id) : null };
+}
+
+// Attaches hasImage/imageUrl to a panel fresh on every response, computed from whether
+// its image file actually exists — never persisted into pages.json, since pages.json's
+// panel objects are also read-modify-written by several endpoints below (e.g. the
+// generic PATCH) and a stale cached URL baked into that JSON would defeat the whole
+// point of using file mtime as the cache-buster.
+function withPanelImage(projectId, pageId, panel) {
+  return { ...panel, ...panelImageInfo(projectId, pageId, panel.id) };
+}
+function withPageImages(projectId, page) {
+  return { ...page, panels: page.panels.map((p) => withPanelImage(projectId, page.id, p)) };
 }
 
 // ---------- Projects ----------
@@ -144,7 +161,7 @@ for (const kind of ENTITY_KINDS) {
 // ---------- Pages (project-scoped) ----------
 
 app.get("/api/projects/:projectId/pages", (req, res) => {
-  res.json(listPages(req.params.projectId));
+  res.json(listPages(req.params.projectId).map((pg) => withPageImages(req.params.projectId, pg)));
 });
 
 app.post("/api/projects/:projectId/pages", (req, res) => {
@@ -164,7 +181,9 @@ app.post("/api/projects/:projectId/pages", (req, res) => {
       // characters/places/objects — this is the sole source of a panel's cast and
       // setting; see scene.js for how mentions are extracted at generation time.
       sceneDoc: EMPTY_SCENE_DOC,
-      imageAssetId: null, // nanoid; served from /uploads (page-panel renders, separate from entity reference images)
+      // No imageAssetId field — whether a panel has an image, and its URL, is derived
+      // fresh on every response from whether pages/<id>/panels/<id>/image.png exists
+      // (see withPanelImage).
     })),
     createdAt: Date.now(),
   };
@@ -172,13 +191,13 @@ app.post("/api/projects/:projectId/pages", (req, res) => {
   const pages = listPages(req.params.projectId);
   pages.push(page);
   savePages(req.params.projectId, pages);
-  res.json(page);
+  res.json(withPageImages(req.params.projectId, page));
 });
 
 app.get("/api/projects/:projectId/pages/:id", (req, res) => {
   const page = listPages(req.params.projectId).find((p) => p.id === req.params.id);
   if (!page) return res.status(404).json({ error: "page not found" });
-  res.json(page);
+  res.json(withPageImages(req.params.projectId, page));
 });
 
 function findPanel(projectId, pageId, panelId) {
@@ -195,31 +214,13 @@ app.patch("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) =
   if (!panel) return res.status(404).json({ error: "panel not found" });
   Object.assign(panel, req.body);
   savePages(projectId, pages);
-  res.json(panel);
+  res.json(withPanelImage(projectId, pageId, panel));
 });
 
 // ---------- Panel image generation (composes a full scene from characters/place/objects) ----------
+// Panel image files themselves (save/load/delete, folder layout) live in store.js,
+// alongside the equivalent character/place/object image functions.
 
-const UPLOAD_DIR = path.join(__dirname, "uploads"); // panel renders only; entity images live under projects/
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-app.use("/uploads", express.static(UPLOAD_DIR));
-
-function savePanelImage(buf) {
-  const id = nanoid(12);
-  fs.writeFileSync(path.join(UPLOAD_DIR, `${id}.png`), buf);
-  return id;
-}
-function loadPanelImage(id) {
-  return fs.readFileSync(path.join(UPLOAD_DIR, `${id}.png`));
-}
-function panelImageUrl(id) {
-  return `/uploads/${id}.png`;
-}
-function deletePanelAsset(panel) {
-  if (!panel.imageAssetId) return;
-  const p = path.join(UPLOAD_DIR, `${panel.imageAssetId}.png`);
-  if (fs.existsSync(p)) fs.unlinkSync(p);
-}
 // Keeps "Panel N" labels sequential and gap-free after a panel is removed or a
 // layout change adds/drops panels — position in the array is what actually
 // drives grid placement (see PageCanvas), this is just the display label.
@@ -236,11 +237,11 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) 
   const { pages, page, panel } = findPanel(projectId, pageId, panelId);
   if (!panel) return res.status(404).json({ error: "panel not found" });
 
-  deletePanelAsset(panel);
+  deletePanelImage(projectId, pageId, panel.id);
   page.panels = page.panels.filter((p) => p.id !== panelId);
   reindexPanelOrder(page.panels);
   savePages(projectId, pages);
-  res.json(page);
+  res.json(withPageImages(projectId, page));
 });
 
 app.delete("/api/projects/:projectId/pages/:pageId", (req, res) => {
@@ -249,7 +250,7 @@ app.delete("/api/projects/:projectId/pages/:pageId", (req, res) => {
   const page = pages.find((p) => p.id === pageId);
   if (!page) return res.status(404).json({ error: "page not found" });
 
-  for (const panel of page.panels) deletePanelAsset(panel);
+  for (const panel of page.panels) deletePanelImage(projectId, pageId, panel.id);
   savePages(projectId, pages.filter((p) => p.id !== pageId));
   res.json({ ok: true });
 });
@@ -268,19 +269,19 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
   if (layout) page.layout = layout;
   if (panelCount != null && panelCount !== page.panels.length) {
     if (panelCount < page.panels.length) {
-      for (const removed of page.panels.slice(panelCount)) deletePanelAsset(removed);
+      for (const removed of page.panels.slice(panelCount)) deletePanelImage(projectId, pageId, removed.id);
       page.panels = page.panels.slice(0, panelCount);
     } else {
       const toAdd = panelCount - page.panels.length;
       for (let i = 0; i < toAdd; i++) {
-        page.panels.push({ id: nanoid(8), order: 0, sceneDoc: EMPTY_SCENE_DOC, imageAssetId: null });
+        page.panels.push({ id: nanoid(8), order: 0, sceneDoc: EMPTY_SCENE_DOC });
       }
     }
     reindexPanelOrder(page.panels);
   }
 
   savePages(projectId, pages);
-  res.json(page);
+  res.json(withPageImages(projectId, page));
 });
 
 // Manually sets (or replaces) a panel's image directly, bypassing Codex — for when a
@@ -293,41 +294,33 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", upload.
   if (!panel) return res.status(404).json({ error: "panel not found" });
   if (!req.file) return res.status(400).json({ error: "image is required" });
 
-  deletePanelAsset(panel);
-  panel.imageAssetId = savePanelImage(req.file.buffer);
+  savePanelImage(projectId, pageId, panel.id, req.file.buffer);
   panel.imageOffset = { x: 50, y: 50 };
   savePages(projectId, pages);
-  res.json({ ...panel, imageUrl: panelImageUrl(panel.imageAssetId) });
+  res.json(withPanelImage(projectId, pageId, panel));
 });
 
 app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", (req, res) => {
   const { projectId, pageId, panelId } = req.params;
-  const { pages, panel } = findPanel(projectId, pageId, panelId);
+  const { panel } = findPanel(projectId, pageId, panelId);
   if (!panel) return res.status(404).json({ error: "panel not found" });
 
-  deletePanelAsset(panel);
-  panel.imageAssetId = null;
-  savePages(projectId, pages);
-  res.json(panel);
+  deletePanelImage(projectId, pageId, panel.id);
+  res.json(withPanelImage(projectId, pageId, panel));
 });
 
 // Reveals a panel's saved image file in the host's native file manager. macOS/Windows can
 // select the specific file; xdg-open has no universal cross-file-manager way to do that,
-// so Linux just opens the containing uploads folder. Same execFile-only, path-must-stay-
-// inside-the-safe-root approach as /projects/:id/open-folder above — imageAssetId comes
-// from the panel we already looked up server-side, never taken raw from the request, but
-// the containment check stays as defense in depth.
+// so Linux just opens the containing per-panel folder. Same execFile-only approach as
+// /projects/:id/open-folder above — the path is built entirely from server-side IDs
+// (projectId/pageId/panelId), never taken raw from the request.
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/open-image", (req, res) => {
   const { projectId, pageId, panelId } = req.params;
   const { panel } = findPanel(projectId, pageId, panelId);
   if (!panel) return res.status(404).json({ error: "panel not found" });
-  if (!panel.imageAssetId) return res.status(404).json({ error: "panel has no image" });
 
-  const filePath = path.resolve(path.join(UPLOAD_DIR, `${panel.imageAssetId}.png`));
-  if (!filePath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
-    return res.status(400).json({ error: "invalid image id" });
-  }
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "image file missing" });
+  const filePath = panelImagePath(projectId, pageId, panelId);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "panel has no image" });
 
   if (process.platform === "darwin") {
     execFile("open", ["-R", filePath], (err) => {
@@ -338,7 +331,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/open-image", (r
       if (err) console.error("open-image: failed to launch explorer:", err.message);
     });
   } else {
-    execFile("xdg-open", [UPLOAD_DIR], (err) => {
+    execFile("xdg-open", [path.dirname(filePath)], (err) => {
       if (err) console.error("open-image: failed to launch xdg-open:", err.message);
     });
   }
@@ -389,7 +382,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       .map((id) => {
         for (const pg of pages) {
           const found = pg.panels.find((p) => p.id === id);
-          if (found) return { ...found, pageTitle: pg.title };
+          if (found) return { ...found, pageId: pg.id, pageTitle: pg.title };
         }
         return null;
       })
@@ -398,14 +391,15 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
         order: p.order,
         pageTitle: p.pageTitle,
         plainText: parseSceneDoc(p.sceneDoc).plainText,
-        imageAssetId: p.imageAssetId,
+        pageId: p.pageId,
+        panelId: p.id,
       }));
 
     const referenceImages = [
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
       ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
-      ...continuityPanels.map((p) => (p.imageAssetId ? loadPanelImage(p.imageAssetId) : null)).filter(Boolean),
+      ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
     ];
 
     const prompt = buildPrompt({
@@ -419,10 +413,10 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 
     const imageBuf = await generateImageViaCodex(projectId, prompt, referenceImages);
 
-    panel.imageAssetId = savePanelImage(imageBuf);
+    savePanelImage(projectId, pageId, panel.id, imageBuf);
     savePages(projectId, pages);
 
-    res.json({ ...panel, imageUrl: panelImageUrl(panel.imageAssetId), prompt });
+    res.json({ ...withPanelImage(projectId, pageId, panel), prompt });
   } catch (err) {
     console.error(err);
     if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });

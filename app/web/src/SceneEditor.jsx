@@ -17,7 +17,7 @@ function buildPanelItems(panels) {
     id: `panels:${p.id}`,
     label: p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`,
     kind: "panels",
-    imageUrl: p.imageAssetId ? `/uploads/${p.imageAssetId}.png` : null,
+    imageUrl: p.imageUrl || null,
   }));
 }
 

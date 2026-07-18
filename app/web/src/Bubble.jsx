@@ -47,6 +47,9 @@ export function fontFamilyFor(fontValue) {
   return FONTS.find((f) => f.value === fontValue)?.family ?? FONTS[0].family;
 }
 
+// Matches the size .bubble-text/.bubble-text-input used before this was adjustable.
+export const DEFAULT_FONT_SIZE = 13;
+
 // A sensible default tail point when turning a bubble's tail back on — just below its
 // center. Shared so the sidebar's "No tail" toggle (App.jsx) computes the same default
 // this component used to when the toggle lived on-canvas.
@@ -302,6 +305,17 @@ function pointsToClipPath(pts) {
   return `polygon(${pts.map((p) => `${p.x}% ${p.y}%`).join(", ")})`;
 }
 
+// Rotates point `p` around `center` by `deg` (screen-space convention: x right, y down —
+// matches everywhere else in this app that rotates a point, e.g. the panel image editor).
+function rotateAroundPoint(p, center, deg) {
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = p.x - center.x;
+  const dy = p.y - center.y;
+  return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos };
+}
+
 function startPointerDrag(e, onMove, onEnd) {
   e.preventDefault();
   e.stopPropagation();
@@ -374,6 +388,14 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     );
   };
 
+  // The tail is stored as if the bubble were unrotated — the visible (rotated) tail
+  // handle is derived from it for rendering (see displayTail below), so dragging it has
+  // to go the other way: convert the screen-space point the user is actually pointing at
+  // back into that unrotated frame before storing it, or the stored tail would drift
+  // further off with every drag once the bubble has any rotation applied.
+  const rotate = bubble.rotate || 0;
+  const center = { x: bubble.x + bubble.width / 2, y: bubble.y + bubble.height / 2 };
+
   const dragTail = (e) => {
     const rect = containerRect();
     let lastPatch = {};
@@ -382,11 +404,16 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
       (ev) => {
         const nx = clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
         const ny = clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
-        lastPatch = { tail: { x: nx, y: ny } };
+        const stored = rotateAroundPoint({ x: nx, y: ny }, center, -rotate);
+        lastPatch = { tail: stored };
         onChange(lastPatch, { commit: false });
       },
       () => onChange(lastPatch, { commit: true })
     );
+  };
+
+  const rotateBubble = () => {
+    onChange({ rotate: (rotate + 90) % 360 }, { commit: true });
   };
 
   const commitText = (text) => {
@@ -404,12 +431,17 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     top: `${bubble.y}%`,
     width: `${bubble.width}%`,
     height: `${bubble.height}%`,
+    transform: rotate ? `rotate(${rotate}deg)` : undefined,
   };
   const boundary = boundaryFor(bubble.shape);
   const tailStyle = tailStyleFor(bubble.shape);
   const outline = tailStyle === "spike" ? outlineWithTail(boundary, bubble) : boundary;
   const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
   const dashed = isDashed(bubble.shape);
+  // The tail-drag handle is a sibling of .bubble, not a child, so it isn't carried along
+  // by that div's CSS rotation — its on-screen position has to be rotated to match by
+  // hand (the inverse of what dragTail un-rotates when storing a new tail point).
+  const displayTail = bubble.tail ? rotateAroundPoint(bubble.tail, center, rotate) : null;
 
   return (
     <>
@@ -435,7 +467,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
           {editingText ? (
             <textarea
               className="bubble-text-input"
-              style={{ fontFamily: fontFamilyFor(bubble.font) }}
+              style={{ fontFamily: fontFamilyFor(bubble.font), fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px` }}
               defaultValue={bubble.text}
               autoFocus
               onPointerDown={(e) => e.stopPropagation()}
@@ -445,7 +477,10 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
               }}
             />
           ) : (
-            <div className="bubble-text" style={{ fontFamily: fontFamilyFor(bubble.font) }}>
+            <div
+              className="bubble-text"
+              style={{ fontFamily: fontFamilyFor(bubble.font), fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px` }}
+            >
               {bubble.text}
             </div>
           )}
@@ -457,14 +492,22 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
               ×
             </button>
             <div className="bubble-resize-handle" onPointerDown={resize} />
+            <button
+              className="bubble-rotate-btn"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={rotateBubble}
+              title="Rotate 90°"
+            >
+              ⟳
+            </button>
           </>
         )}
       </div>
 
-      {editable && bubble.tail && (
+      {editable && displayTail && (
         <div
           className="bubble-tail-handle"
-          style={{ left: `${bubble.tail.x}%`, top: `${bubble.tail.y}%` }}
+          style={{ left: `${displayTail.x}%`, top: `${displayTail.y}%` }}
           onPointerDown={dragTail}
         />
       )}

@@ -194,10 +194,77 @@ export function listPages(projectId) {
       migrated = true;
       return migratePanel(projectId, panel);
     });
+    for (const panel of page.panels) migratePanelImage(projectId, page.id, panel);
   }
   if (migrated) savePages(projectId, pages);
   return pages;
 }
 export function savePages(projectId, pages) {
   writeJSON(path.join(projectDir(projectId), "pages.json"), pages);
+}
+
+// ---------- Panel images: ProjectName/pages/<pageId>/panels/<panelId>/image.png ----------
+// Mirrors the character/place/object folder convention above — a panel's own JSON data
+// (order, scene text, bubbles, crop/rotate/zoom) still lives in pages.json, but its
+// rendered/uploaded image now gets a real per-panel folder instead of the old flat,
+// unsorted uploads/ bucket every project's every panel used to share.
+
+const LEGACY_UPLOAD_DIR = path.join(__dirname, "uploads");
+
+function panelImageDir(projectId, pageId, panelId) {
+  return path.join(projectDir(projectId), "pages", pageId, "panels", panelId);
+}
+// Exported (unlike entities' equivalent) because open-image needs the raw path to shell
+// out to the OS's "reveal this file" command — everything else just needs save/load/delete.
+export function panelImagePath(projectId, pageId, panelId) {
+  return path.join(panelImageDir(projectId, pageId, panelId), "image.png");
+}
+
+// Self-healing, one-time-per-panel migration: older panels point at a flat
+// uploads/<id>.png file via the now-retired imageAssetId field. The first time such a
+// panel is read, move its image into the new per-panel folder — no separate migration
+// script for anyone to remember to run. This MOVES rather than copies: imageAssetId is
+// never cleared once a panel is migrated (nothing writes to it anymore), so if the
+// legacy file were left in place, deleting the image later would make this same
+// migration step silently resurrect it from that legacy copy on the next page load.
+// Consuming the legacy file on first migration closes that off.
+function migratePanelImage(projectId, pageId, panel) {
+  if (!panel.imageAssetId) return;
+  const dest = panelImagePath(projectId, pageId, panel.id);
+  if (fs.existsSync(dest)) return;
+  const legacySrc = path.join(LEGACY_UPLOAD_DIR, `${panel.imageAssetId}.png`);
+  if (!fs.existsSync(legacySrc)) return;
+  fs.mkdirSync(panelImageDir(projectId, pageId, panel.id), { recursive: true });
+  try {
+    fs.renameSync(legacySrc, dest);
+  } catch {
+    // Cross-device (EXDEV) or similar — fall back to copy then remove the source.
+    fs.copyFileSync(legacySrc, dest);
+    fs.unlinkSync(legacySrc);
+  }
+}
+
+export function savePanelImage(projectId, pageId, panelId, buffer) {
+  const dir = panelImageDir(projectId, pageId, panelId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(panelImagePath(projectId, pageId, panelId), buffer);
+}
+
+export function loadPanelImage(projectId, pageId, panelId) {
+  const p = panelImagePath(projectId, pageId, panelId);
+  return fs.existsSync(p) ? fs.readFileSync(p) : null;
+}
+
+export function deletePanelImage(projectId, pageId, panelId) {
+  fs.rmSync(panelImageDir(projectId, pageId, panelId), { recursive: true, force: true });
+}
+
+// mtime doubles as a free cache-buster — every save/regenerate overwrites the file,
+// which bumps mtime automatically, so the browser always refetches the new image
+// without needing a separate version counter persisted in pages.json.
+export function panelImageInfo(projectId, pageId, panelId) {
+  const p = panelImagePath(projectId, pageId, panelId);
+  if (!fs.existsSync(p)) return { hasImage: false, imageUrl: null };
+  const v = Math.round(fs.statSync(p).mtimeMs);
+  return { hasImage: true, imageUrl: `/projects/${projectId}/pages/${pageId}/panels/${panelId}/image.png?v=${v}` };
 }

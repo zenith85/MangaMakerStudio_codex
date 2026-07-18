@@ -4,7 +4,7 @@ import { jsPDF } from "jspdf";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
-import Bubble, { newBubble, FONTS, defaultTailFor } from "./Bubble";
+import Bubble, { newBubble, FONTS, defaultTailFor, DEFAULT_FONT_SIZE } from "./Bubble";
 import ShapePicker from "./ShapePicker";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
@@ -258,7 +258,7 @@ const ENTITY_KINDS = [
 // True if a panel has a generated image or any non-empty scene text/mention — used to
 // warn before a layout change would drop it (see changeLayout in App()).
 function panelHasContent(panel) {
-  if (panel.imageAssetId) return true;
+  if (panel.hasImage) return true;
   const hasNodeContent = (node) => {
     if (!node) return false;
     if (node.type === "mention") return true;
@@ -1233,7 +1233,7 @@ function PanelThumb({
   useEffect(() => {
     const img = imgRef.current;
     if (img && img.complete && img.naturalWidth) setNatural({ w: img.naturalWidth, h: img.naturalHeight });
-  }, [panel.imageAssetId]);
+  }, [panel.imageUrl]);
 
   const offset = panel.imageOffset || { x: 50, y: 50 };
   const rotate = panel.imageRotate || 0;
@@ -1289,7 +1289,7 @@ function PanelThumb({
   };
 
   const onPointerDown = (e) => {
-    if (!panel.imageAssetId || e.button !== 0) return;
+    if (!panel.hasImage || e.button !== 0) return;
     e.preventDefault();
 
     dragRef.current = {
@@ -1360,7 +1360,7 @@ function PanelThumb({
   return (
     <div
       ref={containerRef}
-      className={`panel-slot ${selected ? "selected" : ""} ${panel.imageAssetId ? "has-image" : ""}`}
+      className={`panel-slot ${selected ? "selected" : ""} ${panel.hasImage ? "has-image" : ""}`}
       style={clipPath ? { ...slotStyle, clipPath } : slotStyle}
       onPointerDown={onPointerDown}
     >
@@ -1370,11 +1370,11 @@ function PanelThumb({
           panel's visible area can hit-test against its neighbor's unclipped box
           instead, since that's what actually captures the pointer event. */}
       <div className="panel-slot-image-layer" style={clipPath ? { clipPath } : undefined}>
-        {panel.imageAssetId ? (
+        {panel.hasImage ? (
           <>
             <img
               ref={imgRef}
-              src={`/uploads/${panel.imageAssetId}.png`}
+              src={panel.imageUrl}
               alt=""
               draggable={false}
               onLoad={onImgLoad}
@@ -1513,6 +1513,9 @@ function PanelEditor({
   const setBubbleFont = (bubbleId, font) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, font } : b)));
   };
+  const setBubbleFontSize = (bubbleId, fontSize) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, fontSize } : b)));
+  };
   const removeBubble = (bubbleId) => {
     onCommitBubbles(panel.id, bubbles.filter((b) => b.id !== bubbleId));
   };
@@ -1550,10 +1553,10 @@ function PanelEditor({
             drag it to reposition and resize its crop right on the panel.
           </p>
 
-          {panel.imageAssetId ? (
+          {panel.hasImage ? (
             <img
               className="panel-image-preview"
-              src={`/uploads/${panel.imageAssetId}.png`}
+              src={panel.imageUrl}
               alt=""
               onDragOver={(e) => e.preventDefault()}
               onDrop={onImageDrop}
@@ -1584,7 +1587,7 @@ function PanelEditor({
             >
               Choose file
             </button>
-            {panel.imageAssetId && (
+            {panel.hasImage && (
               <button className="panel-image-action-btn" onClick={openImageLocation}>
                 Open image location
               </button>
@@ -1593,7 +1596,7 @@ function PanelEditor({
 
           {imageError && <p className="error">{imageError}</p>}
 
-          {panel.imageAssetId && (
+          {panel.hasImage && (
             <button className="delete-panel image-clear-button" onClick={clearImage} disabled={imageBusy}>
               Remove image
             </button>
@@ -1625,7 +1628,7 @@ function PanelEditor({
           {error && <p className="error">{error}</p>}
 
           <button className="primary" onClick={generate} disabled={busy}>
-            {busy ? "Generating…" : panel.imageAssetId ? "Regenerate panel" : "Generate panel"}
+            {busy ? "Generating…" : panel.hasImage ? "Regenerate panel" : "Generate panel"}
           </button>
         </section>
       )}
@@ -1670,6 +1673,16 @@ function PanelEditor({
                     </option>
                   ))}
                 </select>
+                <label className="bubble-list-font-size">
+                  Font size
+                  <input
+                    type="number"
+                    min="6"
+                    max="60"
+                    value={b.fontSize || DEFAULT_FONT_SIZE}
+                    onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 60))}
+                  />
+                </label>
               </div>
             ))}
             {bubbles.length === 0 && <p className="empty-hint">No speech bubbles yet.</p>}
