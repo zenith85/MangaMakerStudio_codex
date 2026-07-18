@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { api } from "./api";
@@ -418,6 +418,29 @@ export default function App() {
     api.updatePanel(currentProjectId, currentPage.id, panelId, { imageOffset });
   };
 
+  // Rotate button — discrete 90° steps, persisted immediately (no live-drag phase to debounce).
+  const rotatePanelImage = (panelId, imageRotate) => {
+    setCurrentPage((page) => ({
+      ...page,
+      panels: page.panels.map((p) => (p.id === panelId ? { ...p, imageRotate } : p)),
+    }));
+    api.updatePanel(currentProjectId, currentPage.id, panelId, { imageRotate });
+  };
+
+  // Live drag feedback for the resize button (no network call) — see PanelThumb's
+  // resize-drag handler.
+  const dragPanelScale = (panelId, imageScale) => {
+    setCurrentPage((page) => ({
+      ...page,
+      panels: page.panels.map((p) => (p.id === panelId ? { ...p, imageScale } : p)),
+    }));
+  };
+
+  // Persist the final zoom once the resize drag ends.
+  const commitPanelScale = (panelId, imageScale) => {
+    api.updatePanel(currentProjectId, currentPage.id, panelId, { imageScale });
+  };
+
   // Live bubble edits (drag/resize/tail-aim in progress) — local only, no network call.
   const updateBubblesLive = (panelId, bubbles) => {
     setCurrentPage((page) => ({
@@ -634,6 +657,9 @@ export default function App() {
             onSelect={setSelectedPanelId}
             onDragImage={dragPanelImage}
             onDragImageEnd={commitPanelImage}
+            onRotateImage={rotatePanelImage}
+            onDragScale={dragPanelScale}
+            onDragScaleEnd={commitPanelScale}
             onBubblesLive={updateBubblesLive}
             onBubblesCommit={commitBubbles}
           />
@@ -1098,6 +1124,9 @@ function PageCanvas({
   onSelect,
   onDragImage,
   onDragImageEnd,
+  onRotateImage,
+  onDragScale,
+  onDragScaleEnd,
   onBubblesLive,
   onBubblesCommit,
 }) {
@@ -1129,6 +1158,9 @@ function PageCanvas({
             onSelect={onSelect}
             onDragImage={onDragImage}
             onDragImageEnd={onDragImageEnd}
+            onRotateImage={onRotateImage}
+            onDragScale={onDragScale}
+            onDragScaleEnd={onDragScaleEnd}
             onBubblesLive={onBubblesLive}
             onBubblesCommit={onBubblesCommit}
           />
@@ -1140,11 +1172,25 @@ function PageCanvas({
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 
-// A panel's generated image is rendered with object-fit: cover, so a wider-than-tall
-// (or taller-than-wide) image gets cropped to fill the frame. Holding and dragging the
-// image pans that crop by adjusting object-position — this tracks the drag in pixels,
-// converts it to a percentage of how far the rendered image overflows the frame in each
-// axis, and only treats it as a "select this panel" click if the pointer never moved.
+// object-fit: cover sizes the image to exactly fill the (axis-aligned) frame — rotating
+// that already-fitted box with a plain CSS rotate() just spins it in place, which uncovers
+// the frame's corners (or past 45°, most of it, since the box's long/short axes swap
+// relative to the frame). This is the minimum extra scale, for the given rotation and
+// frame aspect ratio (width/height), needed so the rotated box still fully covers an
+// axis-aligned frame of that aspect ratio with no gaps.
+function requiredCoverScale(rotateDeg, aspect) {
+  const rad = (rotateDeg * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  return Math.max(1, c + s / aspect, aspect * s + c);
+}
+
+// A panel's image is manually sized to its natural aspect ratio (scaled by the resize
+// button's zoom) and positioned with left/top rather than object-fit: cover, so zooming
+// actually zooms the source photo instead of just resizing an already-decided crop (see
+// the sizing math above). Holding and dragging the image pans that crop — this tracks the
+// drag in pixels, converts it to a percentage of how far the image overflows the frame in
+// each axis, and only treats it as a "select this panel" click if the pointer never moved.
 function PanelThumb({
   panel,
   selected,
@@ -1153,14 +1199,78 @@ function PanelThumb({
   onSelect,
   onDragImage,
   onDragImageEnd,
+  onRotateImage,
+  onDragScale,
+  onDragScaleEnd,
   onBubblesLive,
   onBubblesCommit,
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
   const dragRef = useRef(null);
+  const resizeDragRef = useRef(null);
+  const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
+  const [natural, setNatural] = useState(null);
+
+  // Measured directly off the real box (rather than derived from the layout template's
+  // width/height fractions) so it's exact regardless of the page-canvas's own padding/gap.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (el.clientWidth && el.clientHeight) setFrameSize({ w: el.clientWidth, h: el.clientHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // We size/position the image manually instead of object-fit: cover (below), so we need
+  // its natural dimensions ourselves — object-fit would otherwise have worked this out
+  // internally without exposing them.
+  const onImgLoad = (e) => setNatural({ w: e.target.naturalWidth, h: e.target.naturalHeight });
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth) setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+  }, [panel.imageAssetId]);
 
   const offset = panel.imageOffset || { x: 50, y: 50 };
+  const rotate = panel.imageRotate || 0;
+  const zoom = panel.imageScale || 1;
+  const frameW = frameSize.w || 1;
+  const frameH = frameSize.h || 1;
+  const rotateScale = requiredCoverScale(rotate, frameW / frameH);
+
+  // `object-fit: cover` picks a fixed crop from the frame's own box size and never
+  // revisits it — so scaling that already-cropped result via transform just shrinks/grows
+  // the SAME crop, never showing more or less of the original photo. To make zoom behave
+  // like an actual camera zoom (same frame size, more or less of the source visible), we
+  // size the image ourselves at its natural aspect ratio, scaled by `zoom`, and position
+  // it with left/top instead of object-position — object-fit never enters into it.
+  let coverW = frameW;
+  let coverH = frameH;
+  if (natural && natural.w && natural.h) {
+    const naturalRatio = natural.w / natural.h;
+    const frameRatio = frameW / frameH;
+    if (naturalRatio > frameRatio) {
+      coverH = frameH;
+      coverW = frameH * naturalRatio;
+    } else {
+      coverW = frameW;
+      coverH = frameW / naturalRatio;
+    }
+  }
+  const renderedW = coverW * zoom;
+  const renderedH = coverH * zoom;
+  const imgLeft = (frameW - renderedW) * (offset.x / 100);
+  const imgTop = (frameH - renderedH) * (offset.y / 100);
+  // Rotation must pivot on the FRAME's center, not this box's own center — panning moves
+  // the box off-center, and rotating around the wrong point would spin the crop around
+  // some point that visibly drifts as you pan.
+  const rotateOriginX = frameW / 2 - imgLeft;
+  const rotateOriginY = frameH / 2 - imgTop;
+
   const bubbles = panel.bubbles || [];
   const placeholderStyle = clipPath
     ? (() => {
@@ -1180,24 +1290,14 @@ function PanelThumb({
 
   const onPointerDown = (e) => {
     if (!panel.imageAssetId || e.button !== 0) return;
-    const img = imgRef.current;
-    const container = containerRef.current;
-    if (!img || !container || !img.naturalWidth) return;
     e.preventDefault();
-
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    const naturalRatio = img.naturalWidth / img.naturalHeight;
-    const containerRatio = cw / ch;
-    const renderedW = naturalRatio > containerRatio ? ch * naturalRatio : cw;
-    const renderedH = naturalRatio > containerRatio ? ch : cw / naturalRatio;
 
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
       startOffset: offset,
-      overflowX: Math.max(0, renderedW - cw),
-      overflowY: Math.max(0, renderedH - ch),
+      overflowX: Math.max(0, renderedW - frameW),
+      overflowY: Math.max(0, renderedH - frameH),
       moved: false,
     };
     window.addEventListener("pointermove", onPointerMove);
@@ -1228,6 +1328,35 @@ function PanelThumb({
     else onSelect(panel.id);
   };
 
+  // Drag-to-resize on the resize button — dragging up zooms in, down zooms out. `zoom`
+  // (imageScale) is the user's EXTRA zoom on top of rotateScale, which already covers the
+  // frame with no gaps at zoom=1 — going below 1 is allowed (down to 0.5) as a deliberate
+  // "smaller inset photo" look, which means it CAN expose empty frame background at the
+  // corners; that's an intentional tradeoff of allowing zoom-out, not a bug.
+  const RESIZE_DRAG_PX_PER_1X = 200;
+  const onResizePointerDown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    resizeDragRef.current = { startY: e.clientY, startZoom: zoom };
+    window.addEventListener("pointermove", onResizePointerMove);
+    window.addEventListener("pointerup", onResizePointerUp);
+  };
+  const onResizePointerMove = (e) => {
+    const d = resizeDragRef.current;
+    if (!d) return;
+    const next = clamp(d.startZoom + (d.startY - e.clientY) / RESIZE_DRAG_PX_PER_1X, 0.2, 4);
+    d.lastZoom = next;
+    onDragScale(panel.id, next);
+  };
+  const onResizePointerUp = () => {
+    const d = resizeDragRef.current;
+    window.removeEventListener("pointermove", onResizePointerMove);
+    window.removeEventListener("pointerup", onResizePointerUp);
+    resizeDragRef.current = null;
+    if (d && d.lastZoom !== undefined) onDragScaleEnd(panel.id, d.lastZoom);
+  };
+
   return (
     <div
       ref={containerRef}
@@ -1242,13 +1371,38 @@ function PanelThumb({
           instead, since that's what actually captures the pointer event. */}
       <div className="panel-slot-image-layer" style={clipPath ? { clipPath } : undefined}>
         {panel.imageAssetId ? (
-          <img
-            ref={imgRef}
-            src={`/uploads/${panel.imageAssetId}.png`}
-            alt=""
-            draggable={false}
-            style={{ objectPosition: `${offset.x}% ${offset.y}%` }}
-          />
+          <>
+            <img
+              ref={imgRef}
+              src={`/uploads/${panel.imageAssetId}.png`}
+              alt=""
+              draggable={false}
+              onLoad={onImgLoad}
+              style={{
+                position: "absolute",
+                left: imgLeft,
+                top: imgTop,
+                width: renderedW,
+                height: renderedH,
+                transform: `rotate(${rotate}deg) scale(${rotateScale})`,
+                transformOrigin: `${rotateOriginX}px ${rotateOriginY}px`,
+              }}
+            />
+            <button
+              type="button"
+              className="panel-rotate-btn"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRotateImage(panel.id, (rotate + 90) % 360);
+              }}
+            >
+              ⟳
+            </button>
+            <button type="button" className="panel-resize-btn" onPointerDown={onResizePointerDown}>
+              ⤢
+            </button>
+          </>
         ) : (
           <span className="placeholder" style={placeholderStyle} onClick={() => onSelect(panel.id)}>
             Click to set up panel {panel.order + 1}
