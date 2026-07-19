@@ -339,7 +339,16 @@ export default function App() {
   const [showTerminal, setShowTerminal] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
+  const [pdfSavedPath, setPdfSavedPath] = useState(""); // relative to the project folder; lets the "Open" button find it
   const pageCanvasRef = useRef(null);
+
+  const openSavedPdf = async () => {
+    try {
+      await api.openProjectFile(currentProjectId, pdfSavedPath);
+    } catch (err) {
+      setPdfStatus(`Failed: ${err.message}`);
+    }
+  };
 
   const refreshProjects = useCallback(() => api.listProjects().then(setProjects), []);
 
@@ -495,6 +504,7 @@ export default function App() {
 
     setPdfBusy(true);
     setPdfStatus("");
+    setPdfSavedPath("");
     let restoreImages = () => {};
     try {
       restoreImages = await precropPanelImages(pageCanvasRef.current);
@@ -508,10 +518,62 @@ export default function App() {
       formData.append("pdf", blob, "page.pdf");
       const result = await api.savePagePdf(currentProjectId, currentPage.id, formData);
       setPdfStatus(`Saved as pages/${result.filename}`);
+      setPdfSavedPath(`pages/${result.filename}`);
     } catch (err) {
       setPdfStatus(`Failed: ${err.message}`);
     } finally {
       restoreImages();
+      setPdfBusy(false);
+      if (hadSelection) setSelectedPanelId(hadSelection);
+    }
+  };
+
+  // Same per-page capture as exportPagePdf, looped across every page into one multi-page
+  // PDF instead of one file per page. html2canvas can only capture DOM that's actually on
+  // screen, and only one page is ever mounted at a time (`currentPage`) — so this works by
+  // briefly flipping the visible page through each one in turn, capturing it, then moving
+  // on. That means the page view visibly flashes through every page during export; this
+  // is simpler than rendering pages off-screen and the page count is normally small enough
+  // that it doesn't matter in practice.
+  const exportAllPagesPdf = async () => {
+    const hadSelection = selectedPanelId;
+    const hadPageId = currentPage?.id;
+    setSelectedPanelId(null);
+
+    setPdfBusy(true);
+    setPdfStatus("");
+    setPdfSavedPath("");
+    try {
+      let pdf = null;
+      for (const page of pages) {
+        setCurrentPage(page);
+        await new Promise((r) => setTimeout(r, 50));
+
+        const restoreImages = await precropPanelImages(pageCanvasRef.current);
+        const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
+        restoreImages();
+        const imgData = canvas.toDataURL("image/png");
+
+        if (!pdf) {
+          pdf = new jsPDF({ unit: "px", format: [canvas.width, canvas.height] });
+        } else {
+          pdf.addPage([canvas.width, canvas.height]);
+        }
+        pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+      }
+
+      if (!pdf) throw new Error("no pages to export");
+      const blob = pdf.output("blob");
+      const formData = new FormData();
+      formData.append("pdf", blob, "book.pdf");
+      const result = await api.saveProjectPdf(currentProjectId, formData);
+      setPdfStatus(`Saved as ${result.filename}`);
+      setPdfSavedPath(result.filename);
+    } catch (err) {
+      setPdfStatus(`Failed: ${err.message}`);
+    } finally {
+      const restored = pages.find((p) => p.id === hadPageId);
+      setCurrentPage(restored || null);
       setPdfBusy(false);
       if (hadSelection) setSelectedPanelId(hadSelection);
     }
@@ -646,8 +708,11 @@ export default function App() {
           onChangeLayout={changeLayout}
           onDelete={deletePage}
           onExportPdf={exportPagePdf}
+          onExportAllPdf={exportAllPagesPdf}
           pdfBusy={pdfBusy}
           pdfStatus={pdfStatus}
+          pdfSavedPath={pdfSavedPath}
+          onOpenSavedPdf={openSavedPdf}
         />
         {currentPage ? (
           <PageCanvas
@@ -989,7 +1054,20 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   );
 }
 
-function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelete, onExportPdf, pdfBusy, pdfStatus }) {
+function PageBar({
+  pages,
+  currentPage,
+  onOpen,
+  onCreate,
+  onChangeLayout,
+  onDelete,
+  onExportPdf,
+  onExportAllPdf,
+  pdfBusy,
+  pdfStatus,
+  pdfSavedPath,
+  onOpenSavedPdf,
+}) {
   const [showForm, setShowForm] = useState(false);
   const [showLayoutPicker, setShowLayoutPicker] = useState(false);
   const [title, setTitle] = useState("");
@@ -1051,8 +1129,18 @@ function PageBar({ pages, currentPage, onOpen, onCreate, onChangeLayout, onDelet
           {pdfBusy ? "Saving PDF…" : "Save as PDF"}
         </button>
       )}
+      {pages.length > 1 && (
+        <button onClick={onExportAllPdf} disabled={pdfBusy}>
+          {pdfBusy ? "Saving PDF…" : "Export all pages as PDF"}
+        </button>
+      )}
       {pdfStatus && (
         <span className={`pdf-status${pdfStatus.startsWith("Failed") ? " pdf-status-error" : ""}`}>{pdfStatus}</span>
+      )}
+      {pdfSavedPath && (
+        <button className="pdf-open-button" onClick={onOpenSavedPdf}>
+          Open
+        </button>
       )}
 
       {showForm && (

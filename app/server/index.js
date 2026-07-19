@@ -10,6 +10,7 @@ import { nanoid } from "nanoid";
 import { attachTerminal } from "./terminal.js";
 import {
   listProjects,
+  getProject,
   createProject,
   deleteProject,
   listEntities,
@@ -338,9 +339,9 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/open-image", (r
   res.json({ ok: true, path: filePath });
 });
 
-function slugifyPageTitle(title) {
+function slugifyTitle(title) {
   const slug = (title || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-  return slug || "page";
+  return slug || "untitled";
 }
 
 // Saves a finished page as a PDF, rendered client-side (the browser already has the
@@ -355,9 +356,58 @@ app.post("/api/projects/:projectId/pages/:pageId/pdf", upload.single("pdf"), (re
 
   const dir = path.join(PROJECTS_DIR, projectId, "pages");
   fs.mkdirSync(dir, { recursive: true });
-  const filename = `${slugifyPageTitle(page.title)}.pdf`;
+  const filename = `${slugifyTitle(page.title)}.pdf`;
   fs.writeFileSync(path.join(dir, filename), req.file.buffer);
   res.json({ ok: true, filename });
+});
+
+// Saves every page of the project stitched into one multi-page PDF (built client-side —
+// see exportAllPagesPdf in App.jsx), living at the project's root rather than inside
+// pages/ alongside the individual per-page exports, since it isn't one of those.
+app.post("/api/projects/:projectId/pdf", upload.single("pdf"), (req, res) => {
+  const { projectId } = req.params;
+  const project = getProject(projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  if (!req.file) return res.status(400).json({ error: "pdf is required" });
+
+  const filename = `${slugifyTitle(project.name)}.pdf`;
+  fs.writeFileSync(path.join(PROJECTS_DIR, projectId, filename), req.file.buffer);
+  res.json({ ok: true, filename });
+});
+
+// Reveals an arbitrary file saved somewhere under this project's folder — currently used
+// for the "open" button shown right after a PDF export finishes (both the per-page and
+// all-pages ones), so there's a way to jump straight to what was just saved instead of
+// only reading its path in a status message. Same execFile-only, must-stay-inside-the-
+// project's-own-folder approach as the other open-* endpoints above; relativePath is
+// resolved against and checked to stay inside PROJECTS_DIR/:projectId, so it can't escape
+// to an arbitrary path on disk.
+app.post("/api/projects/:projectId/open-file", (req, res) => {
+  const { projectId } = req.params;
+  const { relativePath } = req.body;
+  if (!relativePath) return res.status(400).json({ error: "relativePath is required" });
+
+  const projectDir = path.resolve(path.join(PROJECTS_DIR, projectId));
+  const filePath = path.resolve(path.join(projectDir, relativePath));
+  if (!filePath.startsWith(projectDir + path.sep)) {
+    return res.status(400).json({ error: "invalid path" });
+  }
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "file not found" });
+
+  if (process.platform === "darwin") {
+    execFile("open", ["-R", filePath], (err) => {
+      if (err) console.error("open-file: failed to launch open:", err.message);
+    });
+  } else if (process.platform === "win32") {
+    execFile("explorer", [`/select,${filePath}`], (err) => {
+      if (err) console.error("open-file: failed to launch explorer:", err.message);
+    });
+  } else {
+    execFile("xdg-open", [path.dirname(filePath)], (err) => {
+      if (err) console.error("open-file: failed to launch xdg-open:", err.message);
+    });
+  }
+  res.json({ ok: true, path: filePath });
 });
 
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", async (req, res) => {

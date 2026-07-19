@@ -50,4 +50,7 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/open-image`, { method: "POST" }),
   savePagePdf: (projectId, pageId, formData) =>
     req(`/projects/${projectId}/pages/${pageId}/pdf`, { method: "POST", body: formData }),
+  saveProjectPdf: (projectId, formData) => req(`/projects/${projectId}/pdf`, { method: "POST", body: formData }),
+  openProjectFile: (projectId, relativePath) =>
+    req(`/projects/${projectId}/open-file`, { method: "POST", ...json({ relativePath }) }),
 };

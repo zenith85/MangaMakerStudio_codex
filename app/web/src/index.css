@@ -342,6 +342,20 @@ textarea {
   color: #ff6b6b;
 }
 
+.pdf-open-button {
+  background: none;
+  border: 1px solid #34353f;
+  border-radius: 6px;
+  color: #8fdb9a;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.pdf-open-button:hover {
+  border-color: #4a5cff;
+  color: #e8e8ec;
+}
+
 .layout-picker-wrap {
   position: relative;
 }
