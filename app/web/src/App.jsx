@@ -72,6 +72,30 @@ const LAYOUTS = [
     rows: "1fr 1fr",
   },
   {
+    value: "small-big-medium-4",
+    label: "4 panels — small, big, then 2 medium",
+    panelCount: 4,
+    areas: `"p1 p2" "p3 p2" "p4 p2"`,
+    columns: "1fr 1.4fr",
+    rows: "0.8fr 1fr 1fr",
+  },
+  {
+    value: "small-verybig-medium-4",
+    label: "4 panels — small, very big, then 2 medium",
+    panelCount: 4,
+    areas: `"p1 p1" "p2 p2" "p3 p4"`,
+    columns: "1fr 1fr",
+    rows: "0.5fr 4.5fr 2fr",
+  },
+  {
+    value: "split-top-big-bottom-4",
+    label: "4 panels — split top row, big split bottom row",
+    panelCount: 4,
+    areas: `"p1 p2" "p3 p4"`,
+    columns: "1fr 1fr",
+    rows: "1fr 3fr",
+  },
+  {
     value: "big-left-4",
     label: "4 panels — big left + 3 stacked right",
     panelCount: 4,
@@ -86,6 +110,14 @@ const LAYOUTS = [
     areas: `"p2 p1" "p3 p1" "p4 p1"`,
     columns: "1fr 2fr",
     rows: "1fr 1fr 1fr",
+  },
+  {
+    value: "top-then-tall-left-stacked-right-5",
+    label: "5 panels — top strip, then tall left + 3 stacked right",
+    panelCount: 5,
+    areas: `"p1 p1" "p2 p3" "p2 p4" "p2 p5"`,
+    columns: "1fr 1fr",
+    rows: "1fr 1fr 1fr 1fr",
   },
   {
     value: "grid-2x3",
@@ -544,6 +576,17 @@ export default function App() {
     api.updatePanel(currentProjectId, currentPage.id, panelId, { imageOffset });
   };
 
+  // Generic live-preview patch (no network call) — used by the panel editor sidebar's
+  // zoom slider so the canvas visibly updates while dragging, not just once it's
+  // released. Mirrors dragPanelImage above; that one's offset-specific, this one isn't
+  // since the sidebar has more than one field that wants this (zoom now, maybe more later).
+  const updatePanelLive = (panelId, patch) => {
+    setCurrentPage((page) => ({
+      ...page,
+      panels: page.panels.map((p) => (p.id === panelId ? { ...p, ...patch } : p)),
+    }));
+  };
+
   // Live bubble edits (drag/resize/tail-aim in progress) — local only, no network call.
   const updateBubblesLive = (panelId, bubbles) => {
     setCurrentPage((page) => ({
@@ -852,6 +895,7 @@ export default function App() {
           onUpdated={refreshCurrentPage}
           onDelete={deletePanel}
           onMove={movePanel}
+          onLiveUpdate={updatePanelLive}
           onAddBubble={addBubble}
           onCommitBubbles={commitBubbles}
         />
@@ -1620,6 +1664,7 @@ function PanelEditor({
   onUpdated,
   onDelete,
   onMove,
+  onLiveUpdate,
   onAddBubble,
   onCommitBubbles,
 }) {
@@ -1895,7 +1940,10 @@ function PanelEditor({
                   max="4"
                   step="0.01"
                   value={zoomDraft ?? (panel.imageScale || 1)}
-                  onChange={(e) => setZoomDraft(e.target.value)}
+                  onChange={(e) => {
+                    setZoomDraft(e.target.value);
+                    onLiveUpdate(panel.id, { imageScale: parseFloat(e.target.value) });
+                  }}
                   onMouseUp={(e) => commitZoom(parseFloat(e.target.value))}
                   onTouchEnd={(e) => commitZoom(parseFloat(e.target.value))}
                 />
@@ -1906,7 +1954,11 @@ function PanelEditor({
                   max="4"
                   step="0.01"
                   value={zoomDraft ?? (panel.imageScale || 1)}
-                  onChange={(e) => setZoomDraft(e.target.value)}
+                  onChange={(e) => {
+                    setZoomDraft(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageScale: v });
+                  }}
                   onBlur={(e) => commitZoom(clamp(parseFloat(e.target.value) || 1, 0.2, 4))}
                   onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
                 />
