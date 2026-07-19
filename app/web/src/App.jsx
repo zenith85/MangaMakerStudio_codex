@@ -544,29 +544,6 @@ export default function App() {
     api.updatePanel(currentProjectId, currentPage.id, panelId, { imageOffset });
   };
 
-  // Rotate button — discrete 90° steps, persisted immediately (no live-drag phase to debounce).
-  const rotatePanelImage = (panelId, imageRotate) => {
-    setCurrentPage((page) => ({
-      ...page,
-      panels: page.panels.map((p) => (p.id === panelId ? { ...p, imageRotate } : p)),
-    }));
-    api.updatePanel(currentProjectId, currentPage.id, panelId, { imageRotate });
-  };
-
-  // Live drag feedback for the resize button (no network call) — see PanelThumb's
-  // resize-drag handler.
-  const dragPanelScale = (panelId, imageScale) => {
-    setCurrentPage((page) => ({
-      ...page,
-      panels: page.panels.map((p) => (p.id === panelId ? { ...p, imageScale } : p)),
-    }));
-  };
-
-  // Persist the final zoom once the resize drag ends.
-  const commitPanelScale = (panelId, imageScale) => {
-    api.updatePanel(currentProjectId, currentPage.id, panelId, { imageScale });
-  };
-
   // Live bubble edits (drag/resize/tail-aim in progress) — local only, no network call.
   const updateBubblesLive = (panelId, bubbles) => {
     setCurrentPage((page) => ({
@@ -852,9 +829,6 @@ export default function App() {
             onSelect={setSelectedPanelId}
             onDragImage={dragPanelImage}
             onDragImageEnd={commitPanelImage}
-            onRotateImage={rotatePanelImage}
-            onDragScale={dragPanelScale}
-            onDragScaleEnd={commitPanelScale}
             onBubblesLive={updateBubblesLive}
             onBubblesCommit={commitBubbles}
           />
@@ -1380,9 +1354,6 @@ function PageCanvas({
   onSelect,
   onDragImage,
   onDragImageEnd,
-  onRotateImage,
-  onDragScale,
-  onDragScaleEnd,
   onBubblesLive,
   onBubblesCommit,
 }) {
@@ -1414,9 +1385,6 @@ function PageCanvas({
             onSelect={onSelect}
             onDragImage={onDragImage}
             onDragImageEnd={onDragImageEnd}
-            onRotateImage={onRotateImage}
-            onDragScale={onDragScale}
-            onDragScaleEnd={onDragScaleEnd}
             onBubblesLive={onBubblesLive}
             onBubblesCommit={onBubblesCommit}
           />
@@ -1441,12 +1409,18 @@ function requiredCoverScale(rotateDeg, aspect) {
   return Math.max(1, c + s / aspect, aspect * s + c);
 }
 
-// A panel's image is manually sized to its natural aspect ratio (scaled by the resize
-// button's zoom) and positioned with left/top rather than object-fit: cover, so zooming
-// actually zooms the source photo instead of just resizing an already-decided crop (see
-// the sizing math above). Holding and dragging the image pans that crop — this tracks the
-// drag in pixels, converts it to a percentage of how far the image overflows the frame in
-// each axis, and only treats it as a "select this panel" click if the pointer never moved.
+// A panel's image is manually sized to its natural aspect ratio (scaled by imageScale,
+// set from the panel editor sidebar) and positioned with left/top rather than
+// object-fit: cover, so zooming actually zooms the source photo instead of just resizing
+// an already-decided crop (see the sizing math above). Holding and dragging the image
+// pans that crop — this tracks the drag in pixels, converts it to a percentage of how
+// far the image overflows the frame in each axis, and only treats it as a "select this
+// panel" click if the pointer never moved. Rotate/resize used to have on-canvas overlay
+// buttons here too, but those lived inside .panel-slot-image-layer, which gets a
+// clip-path for tilted/diagonal layouts — a corner-positioned button is frequently
+// outside a slanted panel's actual visible polygon, so it was invisible and unclickable
+// on exactly those panels. Moved to the panel editor sidebar instead, which is never
+// clipped and always in the same place regardless of panel shape.
 function PanelThumb({
   panel,
   selected,
@@ -1455,16 +1429,12 @@ function PanelThumb({
   onSelect,
   onDragImage,
   onDragImageEnd,
-  onRotateImage,
-  onDragScale,
-  onDragScaleEnd,
   onBubblesLive,
   onBubblesCommit,
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
   const dragRef = useRef(null);
-  const resizeDragRef = useRef(null);
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
   const [natural, setNatural] = useState(null);
 
@@ -1584,35 +1554,6 @@ function PanelThumb({
     else onSelect(panel.id);
   };
 
-  // Drag-to-resize on the resize button — dragging up zooms in, down zooms out. `zoom`
-  // (imageScale) is the user's EXTRA zoom on top of rotateScale, which already covers the
-  // frame with no gaps at zoom=1 — going below 1 is allowed (down to 0.5) as a deliberate
-  // "smaller inset photo" look, which means it CAN expose empty frame background at the
-  // corners; that's an intentional tradeoff of allowing zoom-out, not a bug.
-  const RESIZE_DRAG_PX_PER_1X = 200;
-  const onResizePointerDown = (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    resizeDragRef.current = { startY: e.clientY, startZoom: zoom };
-    window.addEventListener("pointermove", onResizePointerMove);
-    window.addEventListener("pointerup", onResizePointerUp);
-  };
-  const onResizePointerMove = (e) => {
-    const d = resizeDragRef.current;
-    if (!d) return;
-    const next = clamp(d.startZoom + (d.startY - e.clientY) / RESIZE_DRAG_PX_PER_1X, 0.2, 4);
-    d.lastZoom = next;
-    onDragScale(panel.id, next);
-  };
-  const onResizePointerUp = () => {
-    const d = resizeDragRef.current;
-    window.removeEventListener("pointermove", onResizePointerMove);
-    window.removeEventListener("pointerup", onResizePointerUp);
-    resizeDragRef.current = null;
-    if (d && d.lastZoom !== undefined) onDragScaleEnd(panel.id, d.lastZoom);
-  };
-
   return (
     <div
       ref={containerRef}
@@ -1644,24 +1585,6 @@ function PanelThumb({
                 transformOrigin: `${rotateOriginX}px ${rotateOriginY}px`,
               }}
             />
-            {selected && (
-              <>
-                <button
-                  type="button"
-                  className="panel-rotate-btn"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRotateImage(panel.id, (rotate + 90) % 360);
-                  }}
-                >
-                  ⟳
-                </button>
-                <button type="button" className="panel-resize-btn" onPointerDown={onResizePointerDown}>
-                  ⤢
-                </button>
-              </>
-            )}
           </>
         ) : (
           <span className="placeholder" style={placeholderStyle} onClick={() => onSelect(panel.id)}>
@@ -1711,6 +1634,10 @@ function PanelEditor({
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
+  // Live value while dragging the zoom slider or typing in either number box — null
+  // means "not editing, show the committed panel value instead" (see the inputs below).
+  const [zoomDraft, setZoomDraft] = useState(null);
+  const [rotateDraft, setRotateDraft] = useState(null);
 
   // PanelEditor remounts per-panel (see key={selectedPanel.id} at the call site) so a
   // stale candidate never shows for the wrong panel — this just avoids leaking the
@@ -1762,6 +1689,32 @@ function PanelEditor({
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith("image/")) uploadImage(file);
+  };
+
+  // Rotate/resize used to be overlay buttons on the panel canvas itself, but those live
+  // inside an element that gets clip-path'd for tilted/diagonal layouts — a corner-
+  // positioned button ends up outside the actual visible (slanted) shape on exactly those
+  // panels, so it was invisible and unclickable there. This sidebar is never clipped and
+  // always in the same spot regardless of panel shape, so it lives here instead.
+  const rotateImage = async () => {
+    const next = ((panel.imageRotate || 0) + 90) % 360;
+    await api.updatePanel(projectId, page.id, panel.id, { imageRotate: next });
+    await onUpdated();
+  };
+
+  const commitZoom = async (value) => {
+    await api.updatePanel(projectId, page.id, panel.id, { imageScale: value });
+    setZoomDraft(null);
+    await onUpdated();
+  };
+
+  // Typed rotation isn't limited to 90° steps like the button above — normalized into
+  // [0, 360) so e.g. -10 and 710 both land on the same, sensible 350°.
+  const commitRotate = async (value) => {
+    const normalized = ((value % 360) + 360) % 360;
+    await api.updatePanel(projectId, page.id, panel.id, { imageRotate: normalized });
+    setRotateDraft(null);
+    await onUpdated();
   };
 
   // Sends the panel's CURRENT (already-committed) image to Codex as a reference, along
@@ -1840,7 +1793,7 @@ function PanelEditor({
 
       <div className="tabs panel-editor-tabs">
         <button className={tab === "image" ? "active" : ""} onClick={() => setTab("image")}>
-          Image
+          Canvas
         </button>
         <button className={tab === "scene" ? "active" : ""} onClick={() => setTab("scene")}>
           Scene
@@ -1915,6 +1868,52 @@ function PanelEditor({
               </button>
             )}
           </div>
+
+          {panel.hasImage && (
+            <div className="panel-image-transform">
+              <button className="panel-image-action-btn" onClick={rotateImage}>
+                ⟳ Rotate 90°
+              </button>
+              <label className="panel-zoom-control">
+                Rotation
+                <input
+                  type="number"
+                  className="panel-number-input"
+                  step="1"
+                  value={rotateDraft ?? Math.round(panel.imageRotate || 0)}
+                  onChange={(e) => setRotateDraft(e.target.value)}
+                  onBlur={(e) => commitRotate(parseFloat(e.target.value) || 0)}
+                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                />
+                <span className="panel-zoom-value">°</span>
+              </label>
+              <label className="panel-zoom-control">
+                Zoom
+                <input
+                  type="range"
+                  min="0.2"
+                  max="4"
+                  step="0.01"
+                  value={zoomDraft ?? (panel.imageScale || 1)}
+                  onChange={(e) => setZoomDraft(e.target.value)}
+                  onMouseUp={(e) => commitZoom(parseFloat(e.target.value))}
+                  onTouchEnd={(e) => commitZoom(parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="panel-number-input"
+                  min="0.2"
+                  max="4"
+                  step="0.01"
+                  value={zoomDraft ?? (panel.imageScale || 1)}
+                  onChange={(e) => setZoomDraft(e.target.value)}
+                  onBlur={(e) => commitZoom(clamp(parseFloat(e.target.value) || 1, 0.2, 4))}
+                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                />
+                <span className="panel-zoom-value">×</span>
+              </label>
+            </div>
+          )}
 
           {imageError && <p className="error">{imageError}</p>}
 

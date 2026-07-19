@@ -491,39 +491,6 @@ button {
   object-fit: cover;
 }
 
-/* Same overlay-icon-button convention as .project-card-delete — circular, borderless,
-   translucent-dark until hovered, then solid. Blue instead of red since these aren't
-   destructive actions. */
-.panel-rotate-btn,
-.panel-resize-btn {
-  position: absolute;
-  top: 6px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.55);
-  color: #e8e8ec;
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-  z-index: 5;
-}
-
-.panel-rotate-btn:hover,
-.panel-resize-btn:hover {
-  background: #4a5cff;
-  color: white;
-}
-
-.panel-rotate-btn {
-  right: 6px;
-}
-
-.panel-resize-btn {
-  right: 34px;
-}
-
 .panel-slot.has-image {
   cursor: grab;
   touch-action: none;
@@ -1270,6 +1237,34 @@ button.primary:disabled {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.panel-image-transform {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.panel-zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #999;
+}
+
+.panel-zoom-control input[type="range"] {
+  width: 120px;
+}
+
+.panel-zoom-value {
+  color: #ccc;
+}
+
+.panel-number-input {
+  width: 56px;
 }
 
 /* Same look as .open-folder-button — the sidebar's established secondary-action style —
