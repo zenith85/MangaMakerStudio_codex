@@ -40,6 +40,8 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "PATCH", ...json(body) }),
   deletePanel: (projectId, pageId, panelId) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "DELETE" }),
+  movePanel: (projectId, pageId, panelId, direction) =>
+    req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/move`, { method: "POST", ...json({ direction }) }),
   generatePanel: (projectId, pageId, panelId, body) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/generate`, { method: "POST", ...json(body) }),
   uploadPanelImage: (projectId, pageId, panelId, formData) =>

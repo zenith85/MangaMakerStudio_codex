@@ -735,6 +735,14 @@ export default function App() {
     setSelectedPanelId(null);
   };
 
+  // Swaps this panel with its neighbor — the panel stays selected throughout, it's just
+  // moved to a different spot in the grid (see the server's reindexPanelOrder comment).
+  const movePanel = async (panelId, direction) => {
+    const updated = await api.movePanel(currentProjectId, currentPage.id, panelId, direction);
+    setCurrentPage(updated);
+    setPages((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
   const selectedPanel = currentPage?.panels.find((p) => p.id === selectedPanelId) || null;
 
   // Every panel across every page in the project, for the scene editor's #mention list
@@ -869,6 +877,7 @@ export default function App() {
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
           onDelete={deletePanel}
+          onMove={movePanel}
           onAddBubble={addBubble}
           onCommitBubbles={commitBubbles}
         />
@@ -1687,6 +1696,7 @@ function PanelEditor({
   onClose,
   onUpdated,
   onDelete,
+  onMove,
   onAddBubble,
   onCommitBubbles,
 }) {
@@ -1837,6 +1847,22 @@ function PanelEditor({
         </button>
         <button className={tab === "bubbles" ? "active" : ""} onClick={() => setTab("bubbles")}>
           Speech bubbles
+        </button>
+        <button
+          className="panel-move-btn"
+          title="Move panel earlier"
+          onClick={() => onMove(panel.id, "left")}
+          disabled={panel.order === 0}
+        >
+          ←
+        </button>
+        <button
+          className="panel-move-btn"
+          title="Move panel later"
+          onClick={() => onMove(panel.id, "right")}
+          disabled={panel.order === page.panels.length - 1}
+        >
+          →
         </button>
       </div>
 

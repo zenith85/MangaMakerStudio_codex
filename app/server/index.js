@@ -282,6 +282,27 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) 
   res.json(withPageImages(projectId, page));
 });
 
+// Swaps this panel with its neighbor on either side — array position is what actually
+// drives grid placement (see reindexPanelOrder above), so the other panel visibly shifts
+// into this one's old spot in the same move.
+app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/move", (req, res) => {
+  const { projectId, pageId, panelId } = req.params;
+  const { direction } = req.body;
+  const { pages, page, panel } = findPanel(projectId, pageId, panelId);
+  if (!panel) return res.status(404).json({ error: "panel not found" });
+
+  const index = page.panels.findIndex((p) => p.id === panelId);
+  const targetIndex = direction === "left" ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= page.panels.length) {
+    return res.status(400).json({ error: "panel is already at that end" });
+  }
+
+  [page.panels[index], page.panels[targetIndex]] = [page.panels[targetIndex], page.panels[index]];
+  reindexPanelOrder(page.panels);
+  savePages(projectId, pages);
+  res.json(withPageImages(projectId, page));
+});
+
 app.delete("/api/projects/:projectId/pages/:pageId", (req, res) => {
   const { projectId, pageId } = req.params;
   const pages = listPages(projectId);

@@ -380,10 +380,13 @@ textarea {
   align-items: center;
 }
 
+/* Fixed-width columns (not 1fr) so the grid's own natural width is exactly 3 columns
+   wide — the popover has no width of its own, so it shrink-wraps to whatever this
+   computes to instead of stretching to fit every option in one long row. */
 .layout-picker {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
   gap: 6px;
-  flex-wrap: wrap;
 }
 
 .layout-option {
@@ -574,6 +577,32 @@ button {
   background: none;
   border: none;
   color: #aaa;
+}
+
+/* .tabs button (above) sets flex: 1 + its own background/border/color for every tab in
+   this row — needs matching specificity (class + tag, not just class) to actually win,
+   and flex: 0 0 auto so these two don't stretch to fill space like the tabs do. */
+.panel-editor-tabs button.panel-move-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 6px;
+  background: #4a5cff;
+  border: 1px solid #4a5cff;
+  color: white;
+}
+
+.panel-editor-tabs button.panel-move-btn:hover:not(:disabled) {
+  background: #3a4ae0;
+  border-color: #3a4ae0;
+}
+
+.panel-editor-tabs button.panel-move-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .panel-editor section {
