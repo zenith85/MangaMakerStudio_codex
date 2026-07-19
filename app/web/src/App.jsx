@@ -4,7 +4,18 @@ import { jsPDF } from "jspdf";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
-import Bubble, { newBubble, FONTS, defaultTailFor, DEFAULT_FONT_SIZE } from "./Bubble";
+import Bubble, {
+  newBubble,
+  FONTS,
+  defaultTailFor,
+  DEFAULT_FONT_SIZE,
+  boundaryFor,
+  tailStyleFor,
+  outlineWithTail,
+  dotTrailPoints,
+  isDashed,
+  isSharpCornered,
+} from "./Bubble";
 import ShapePicker from "./ShapePicker";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
@@ -327,6 +338,107 @@ async function precropPanelImages(container) {
   return () => restores.forEach((fn) => fn());
 }
 
+// html2canvas also doesn't reliably rasterize the bubble outline SVGs (see Bubble.jsx) —
+// specifically, a tail whose point sits far outside the bubble's own box (relying on the
+// SVG's overflow: visible, which a real browser honors but html2canvas's approximate
+// renderer doesn't) comes out as a broken/jagged mark instead of a clean spike, the
+// farther outside the box it reaches. Same fix as precropPanelImages above: bake the
+// correct geometry onto a plain canvas overlay — computed directly from the bubble data,
+// not read back from the DOM — and hide the live SVGs during capture, since html2canvas
+// handles plain canvases fine. The bubble TEXT is untouched; it's ordinary DOM and
+// already renders correctly.
+function precropBubbleOutlines(container, page) {
+  if (!container || !page) return () => {};
+  const panelSlots = Array.from(container.querySelectorAll(".panel-slot"));
+  const containerRect = container.getBoundingClientRect();
+  if (!containerRect.width || !containerRect.height) return () => {};
+
+  const SCALE = 2; // matches the scale: 2 passed to html2canvas for the actual capture
+  const overlay = document.createElement("canvas");
+  overlay.width = Math.round(containerRect.width * SCALE);
+  overlay.height = Math.round(containerRect.height * SCALE);
+  overlay.style.position = "absolute";
+  overlay.style.left = "0";
+  overlay.style.top = "0";
+  overlay.style.width = "100%";
+  overlay.style.height = "100%";
+  overlay.style.pointerEvents = "none";
+  const ctx = overlay.getContext("2d");
+  ctx.scale(SCALE, SCALE);
+
+  const rotatePoint = (p, center, deg) => {
+    if (!deg) return p;
+    const rad = (deg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const dx = p.x - center.x;
+    const dy = p.y - center.y;
+    return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos };
+  };
+
+  page.panels.forEach((panel, i) => {
+    const slot = panelSlots[i];
+    if (!slot || !(panel.bubbles || []).length) return;
+    const slotRect = slot.getBoundingClientRect();
+    const originX = slotRect.left - containerRect.left;
+    const originY = slotRect.top - containerRect.top;
+
+    for (const bubble of panel.bubbles) {
+      const rotate = bubble.rotate || 0;
+      const bx = originX + (bubble.x / 100) * slotRect.width;
+      const by = originY + (bubble.y / 100) * slotRect.height;
+      const bw = (bubble.width / 100) * slotRect.width;
+      const bh = (bubble.height / 100) * slotRect.height;
+      const center = { x: bx + bw / 2, y: by + bh / 2 };
+      const toScreen = (p) => rotatePoint({ x: bx + (p.x / 100) * bw, y: by + (p.y / 100) * bh }, center, rotate);
+
+      const boundary = boundaryFor(bubble.shape);
+      const tailStyle = tailStyleFor(bubble.shape);
+      const outline = (tailStyle === "spike" ? outlineWithTail(boundary, bubble) : boundary).map(toScreen);
+      const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
+      const avgScale = (bw + bh) / 2 / 100; // dot radii are in the same 0-100 local units as the boundary
+
+      ctx.save();
+      ctx.beginPath();
+      outline.forEach((p, idx) => (idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = "white";
+      ctx.fill();
+      ctx.lineJoin = isSharpCornered(bubble.shape) ? "miter" : "round";
+      ctx.setLineDash(isDashed(bubble.shape) ? [5, 4] : []);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#1a1a1a";
+      ctx.stroke();
+      ctx.restore();
+
+      for (const d of dots) {
+        const p = toScreen(d);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, d.r * avgScale, 0, Math.PI * 2);
+        ctx.fillStyle = "white";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#1a1a1a";
+        ctx.stroke();
+      }
+    }
+  });
+
+  container.appendChild(overlay);
+  const svgs = Array.from(container.querySelectorAll(".bubble-outline"));
+  const prevVisibility = svgs.map((svg) => svg.style.visibility);
+  svgs.forEach((svg) => {
+    svg.style.visibility = "hidden";
+  });
+
+  return () => {
+    overlay.remove();
+    svgs.forEach((svg, i) => {
+      svg.style.visibility = prevVisibility[i];
+    });
+  };
+}
+
 export default function App() {
   const [projects, setProjects] = useState(null); // null = not loaded yet
   const [currentProjectId, setCurrentProjectId] = useState(null);
@@ -506,8 +618,10 @@ export default function App() {
     setPdfStatus("");
     setPdfSavedPath("");
     let restoreImages = () => {};
+    let restoreBubbles = () => {};
     try {
       restoreImages = await precropPanelImages(pageCanvasRef.current);
+      restoreBubbles = precropBubbleOutlines(pageCanvasRef.current, currentPage);
       const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF({ unit: "px", format: [canvas.width, canvas.height] });
@@ -523,6 +637,7 @@ export default function App() {
       setPdfStatus(`Failed: ${err.message}`);
     } finally {
       restoreImages();
+      restoreBubbles();
       setPdfBusy(false);
       if (hadSelection) setSelectedPanelId(hadSelection);
     }
@@ -550,8 +665,10 @@ export default function App() {
         await new Promise((r) => setTimeout(r, 50));
 
         const restoreImages = await precropPanelImages(pageCanvasRef.current);
+        const restoreBubbles = precropBubbleOutlines(pageCanvasRef.current, page);
         const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
         restoreImages();
+        restoreBubbles();
         const imgData = canvas.toDataURL("image/png");
 
         if (!pdf) {
@@ -1476,20 +1593,24 @@ function PanelThumb({
                 transformOrigin: `${rotateOriginX}px ${rotateOriginY}px`,
               }}
             />
-            <button
-              type="button"
-              className="panel-rotate-btn"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onRotateImage(panel.id, (rotate + 90) % 360);
-              }}
-            >
-              ⟳
-            </button>
-            <button type="button" className="panel-resize-btn" onPointerDown={onResizePointerDown}>
-              ⤢
-            </button>
+            {selected && (
+              <>
+                <button
+                  type="button"
+                  className="panel-rotate-btn"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRotateImage(panel.id, (rotate + 90) % 360);
+                  }}
+                >
+                  ⟳
+                </button>
+                <button type="button" className="panel-resize-btn" onPointerDown={onResizePointerDown}>
+                  ⤢
+                </button>
+              </>
+            )}
           </>
         ) : (
           <span className="placeholder" style={placeholderStyle} onClick={() => onSelect(panel.id)}>
@@ -1798,7 +1919,7 @@ function PanelEditor({
               <div className="edit-compare-option">
                 <span className="edit-compare-label">After</span>
                 <img src={editCandidate.url} alt="After edit" />
-                <button className="primary" onClick={useEditedVersion} disabled={imageBusy}>
+                <button onClick={useEditedVersion} disabled={imageBusy}>
                   Keep this one
                 </button>
               </div>
