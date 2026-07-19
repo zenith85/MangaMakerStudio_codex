@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
+import sharp from "sharp";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
@@ -37,12 +38,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Every image file on disk is always named/served as "image.png" (see store.js) — but a
+// manually-uploaded file could be a JPG, WEBP, etc., saved as-is under that name. Browsers
+// render it fine regardless (they sniff actual content, not the extension), but the file
+// on disk is then mislabeled, which can confuse anything else that opens it expecting a
+// real PNG. Decoding+re-encoding through sharp on upload means the bytes always actually
+// match the name — accepts any format sharp can read (a strict superset of PNG/JPEG).
+// Codex-generated images skip this: codex.js already asks for a PNG output file directly.
+async function normalizeUploadedImage(buffer) {
+  try {
+    return await sharp(buffer).png().toBuffer();
+  } catch {
+    throw new Error("Uploaded file isn't a valid image");
+  }
+}
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use("/projects", express.static(PROJECTS_DIR)); // serves .../<projectId>/<kind>/<entityId>/image.png directly
 
-const ENTITY_KINDS = ["characters", "places", "objects"];
+// References are plain uploaded images (no Codex generation, no descriptive fields) —
+// they share the same generic CRUD as characters/places/objects, but ENTITY_KINDS is the
+// wider list used only for list/create/update/delete; GENERATABLE_KINDS below stays
+// narrower so a /generate route only exists for kinds that actually have one.
+const ENTITY_KINDS = ["characters", "places", "objects", "references"];
+const GENERATABLE_KINDS = ["characters", "places", "objects"];
 
 function withEntityUrl(projectId, kind, entity) {
   return { ...entity, imageUrl: entity.hasImage ? entityImageUrl(projectId, kind, entity.id) : null };
@@ -102,7 +123,7 @@ for (const kind of ENTITY_KINDS) {
     res.json(listEntities(req.params.projectId, kind).map((e) => withEntityUrl(req.params.projectId, kind, e)));
   });
 
-  app.post(`/api/projects/:projectId/${kind}`, upload.single("image"), (req, res) => {
+  app.post(`/api/projects/:projectId/${kind}`, upload.single("image"), async (req, res) => {
     const { name, style } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "name is required" });
     let fields = {};
@@ -113,12 +134,19 @@ for (const kind of ENTITY_KINDS) {
         return res.status(400).json({ error: "fields must be valid JSON" });
       }
     }
+    if (req.file) {
+      try {
+        req.file.buffer = await normalizeUploadedImage(req.file.buffer);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
     const entity = createEntity(req.params.projectId, kind, { name, fields, style });
     if (req.file) saveEntityImage(req.params.projectId, kind, entity.id, req.file.buffer);
     res.json(withEntityUrl(req.params.projectId, kind, getEntity(req.params.projectId, kind, entity.id)));
   });
 
-  app.patch(`/api/projects/:projectId/${kind}/:id`, upload.single("image"), (req, res) => {
+  app.patch(`/api/projects/:projectId/${kind}/:id`, upload.single("image"), async (req, res) => {
     const { projectId, id } = req.params;
     let fields;
     if (req.body.fields) {
@@ -126,6 +154,13 @@ for (const kind of ENTITY_KINDS) {
         fields = typeof req.body.fields === "string" ? JSON.parse(req.body.fields) : req.body.fields;
       } catch {
         return res.status(400).json({ error: "fields must be valid JSON" });
+      }
+    }
+    if (req.file) {
+      try {
+        req.file.buffer = await normalizeUploadedImage(req.file.buffer);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
       }
     }
     const entity = updateEntity(projectId, kind, id, { name: req.body.name, fields, style: req.body.style });
@@ -138,7 +173,9 @@ for (const kind of ENTITY_KINDS) {
     deleteEntity(req.params.projectId, kind, req.params.id);
     res.json({ ok: true });
   });
+}
 
+for (const kind of GENERATABLE_KINDS) {
   // Generate (or redraw) this entity's single reference image via Codex.
   app.post(`/api/projects/:projectId/${kind}/:id/generate`, async (req, res) => {
     try {
@@ -289,13 +326,20 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
 // generated image isn't well composed and the user would rather place their own.
 // Resets imageOffset back to centered since a brand new image's crop has no relation to
 // whatever the previous one's pan position was.
-app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", upload.single("image"), (req, res) => {
+app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", upload.single("image"), async (req, res) => {
   const { projectId, pageId, panelId } = req.params;
   const { pages, panel } = findPanel(projectId, pageId, panelId);
   if (!panel) return res.status(404).json({ error: "panel not found" });
   if (!req.file) return res.status(400).json({ error: "image is required" });
 
-  savePanelImage(projectId, pageId, panel.id, req.file.buffer);
+  let buffer;
+  try {
+    buffer = await normalizeUploadedImage(req.file.buffer);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  savePanelImage(projectId, pageId, panel.id, buffer);
   panel.imageOffset = { x: 50, y: 50 };
   savePages(projectId, pages);
   res.json(withPanelImage(projectId, pageId, panel));
@@ -419,10 +463,11 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     Object.assign(panel, req.body); // sceneDoc
     savePages(projectId, pages);
 
-    const { plainText, characterIds, placeIds, objectIds, panelIds } = parseSceneDoc(panel.sceneDoc);
+    const { plainText, characterIds, placeIds, objectIds, referenceIds, panelIds } = parseSceneDoc(panel.sceneDoc);
     const characters = characterIds.map((id) => getEntity(projectId, "characters", id)).filter(Boolean);
     const places = placeIds.map((id) => getEntity(projectId, "places", id)).filter(Boolean);
     const objects = objectIds.map((id) => getEntity(projectId, "objects", id)).filter(Boolean);
+    const references = referenceIds.map((id) => getEntity(projectId, "references", id)).filter(Boolean);
 
     // Panels mentioned in the scene text (e.g. "#Panel 2") anchor continuity — their
     // generated image comes along as a reference so the room/decor/props stay
@@ -449,6 +494,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
       ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
+      ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
       ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
     ];
 
@@ -457,6 +503,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       characters,
       places,
       objects,
+      references,
       continuityPanels,
       stylePreset: page.stylePreset,
     });

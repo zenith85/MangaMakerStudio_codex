@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
-const ENTITY_KINDS = ["characters", "places", "objects"];
+const ENTITY_KINDS = ["characters", "places", "objects", "references"];
 
 fs.mkdirSync(PROJECTS_DIR, { recursive: true });
 

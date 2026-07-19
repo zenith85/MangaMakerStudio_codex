@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 
-const KIND_LABEL = { characters: "Character", places: "Place", objects: "Object", panels: "Panel" };
+const KIND_LABEL = { characters: "Character", places: "Place", objects: "Object", references: "Reference", panels: "Panel" };
 
 // Keyboard/click list rendered inside the #/@ suggestion popup (see scene-editor's
 // suggestion.render). Tiptap calls onKeyDown on this via the forwarded ref while the

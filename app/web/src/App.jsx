@@ -264,7 +264,12 @@ const ENTITY_KINDS = [
   { value: "characters", label: "Characters", singular: "character" },
   { value: "places", label: "Places", singular: "place" },
   { value: "objects", label: "Objects", singular: "object" },
+  { value: "references", label: "References", singular: "reference" },
 ];
+
+// References don't have Codex generation, style, or descriptive fields — just a name and
+// an uploaded picture — so EntityCreatorModal checks this to hide those sections.
+const GENERATABLE_ENTITY_KINDS = new Set(["characters", "places", "objects"]);
 
 // True if a panel has a generated image or any non-empty scene text/mention — used to
 // warn before a layout change would drop it (see changeLayout in App()).
@@ -443,7 +448,7 @@ export default function App() {
   const [projects, setProjects] = useState(null); // null = not loaded yet
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [kind, setKind] = useState("characters");
-  const [entities, setEntities] = useState({ characters: [], places: [], objects: [] });
+  const [entities, setEntities] = useState({ characters: [], places: [], objects: [], references: [] });
   const [editingEntity, setEditingEntity] = useState(null); // { kind, entity } | { kind, entity: null } for "new"
   const [pages, setPages] = useState([]);
   const [currentPage, setCurrentPage] = useState(null);
@@ -465,7 +470,7 @@ export default function App() {
   const refreshProjects = useCallback(() => api.listProjects().then(setProjects), []);
 
   const refreshEntities = useCallback((projectId) => {
-    for (const k of ["characters", "places", "objects"]) {
+    for (const k of ["characters", "places", "objects", "references"]) {
       api.listEntities(projectId, k).then((list) => setEntities((prev) => ({ ...prev, [k]: list })));
     }
   }, []);
@@ -859,6 +864,7 @@ export default function App() {
           characters={entities.characters}
           places={entities.places}
           objects={entities.objects}
+          references={entities.references}
           allPanels={allPanelsForMention}
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
@@ -1003,6 +1009,7 @@ function FieldsEditor({ fields, onChange }) {
 // generate against the same entity, replacing its image.
 function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, onSaved }) {
   const singular = ENTITY_KINDS.find((k) => k.value === kind).singular;
+  const generatable = GENERATABLE_ENTITY_KINDS.has(kind);
   const [entity, setEntity] = useState(initialEntity);
   const [name, setName] = useState(initialEntity?.name || "");
   const [style, setStyle] = useState(initialEntity?.style || "manga_bw");
@@ -1013,6 +1020,19 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [imageTab, setImageTab] = useState("create");
+  // A picture picked before the entity is first saved can't be uploaded yet (there's no
+  // entity id for the image endpoint to attach it to) — buffered here instead, previewed
+  // via an object URL, and sent along with the very first save. Editing an existing
+  // entity's picture still uploads immediately (see uploadImage below); this is only for
+  // the "brand new, not saved yet" case.
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingPreviewUrl, setPendingPreviewUrl] = useState(null);
+
+  useEffect(() => {
+    return () => {
+      if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+    };
+  }, [pendingPreviewUrl]);
 
   const allFields = { ...fields, description };
 
@@ -1022,14 +1042,21 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
     try {
       const formData = new FormData();
       formData.append("name", name.trim());
-      formData.append("style", style);
-      formData.append("fields", JSON.stringify(allFields));
+      // References are just a name + picture — no style/fields to save.
+      if (generatable) {
+        formData.append("style", style);
+        formData.append("fields", JSON.stringify(allFields));
+      }
       if (entity) {
         const updated = await api.updateEntity(projectId, kind, entity.id, formData);
         setEntity(updated);
       } else {
+        if (pendingFile) formData.append("image", pendingFile);
         const created = await api.createEntity(projectId, kind, formData);
         setEntity(created);
+        if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+        setPendingFile(null);
+        setPendingPreviewUrl(null);
       }
       onSaved();
     } catch (err) {
@@ -1057,11 +1084,20 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
     }
   };
 
-  const uploadImage = async (file) => {
+  // The file input calls this — for a brand new (unsaved) entity it just buffers the
+  // picked file for saveDetails to send; for an existing one it uploads right away.
+  const pickImage = (file) => {
+    if (!file) return;
     if (!entity) {
-      setError("Save the details first, then upload a picture.");
+      if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+      setPendingFile(file);
+      setPendingPreviewUrl(URL.createObjectURL(file));
       return;
     }
+    uploadImage(file);
+  };
+
+  const uploadImage = async (file) => {
     setBusy(true);
     setError("");
     try {
@@ -1097,20 +1133,24 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
             <h4>Name</h4>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
 
-            <h4>Description</h4>
-            <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
+            {generatable && (
+              <>
+                <h4>Description</h4>
+                <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
 
-            <h4>Details</h4>
-            <FieldsEditor fields={fields} onChange={setFields} />
+                <h4>Details</h4>
+                <FieldsEditor fields={fields} onChange={setFields} />
 
-            <h4>Style</h4>
-            <select value={style} onChange={(e) => setStyle(e.target.value)}>
-              {STYLE_PRESETS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+                <h4>Style</h4>
+                <select value={style} onChange={(e) => setStyle(e.target.value)}>
+                  {STYLE_PRESETS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
 
             {error && <p className="error">{error}</p>}
 
@@ -1127,29 +1167,31 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
 
           <section className="entity-image-section">
             <h4>Picture</h4>
-            <div className="tabs entity-image-tabs">
-              <button className={imageTab === "create" ? "active" : ""} onClick={() => setImageTab("create")}>
-                Create
-              </button>
-              <button className={imageTab === "generate" ? "active" : ""} onClick={() => setImageTab("generate")}>
-                Generate
-              </button>
-            </div>
+            {generatable && (
+              <div className="tabs entity-image-tabs">
+                <button className={imageTab === "create" ? "active" : ""} onClick={() => setImageTab("create")}>
+                  Create
+                </button>
+                <button className={imageTab === "generate" ? "active" : ""} onClick={() => setImageTab("generate")}>
+                  Generate
+                </button>
+              </div>
+            )}
 
-            {entity?.imageUrl ? (
-              <img className="entity-preview" src={entity.imageUrl} alt={entity.name} />
+            {pendingPreviewUrl || entity?.imageUrl ? (
+              <img className="entity-preview" src={pendingPreviewUrl || entity.imageUrl} alt={name || entity?.name} />
             ) : (
               <div className="entity-preview entity-preview-empty">No image yet</div>
             )}
 
-            {imageTab === "create" ? (
+            {!generatable || imageTab === "create" ? (
               <>
                 <p className="scene-editor-hint">Browse for a picture on your computer and use it directly.</p>
                 <input
                   type="file"
                   accept="image/*"
                   disabled={busy}
-                  onChange={(e) => e.target.files[0] && uploadImage(e.target.files[0])}
+                  onChange={(e) => pickImage(e.target.files[0])}
                 />
               </>
             ) : (
@@ -1163,7 +1205,7 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
               </>
             )}
 
-            {!entity && <p className="empty-hint">Save the details below first, then come back here.</p>}
+            {pendingFile && !entity && <p className="empty-hint">Picked — click "Create" to save it.</p>}
           </section>
         </div>
       </div>
@@ -1640,6 +1682,7 @@ function PanelEditor({
   characters,
   places,
   objects,
+  references,
   allPanels,
   onClose,
   onUpdated,
@@ -1863,6 +1906,7 @@ function PanelEditor({
           <p className="scene-editor-hint">
             Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
             highlighted, and its reference image will be used when generating this panel. Type{" "}
+            <strong>!</strong> to pull in any uploaded reference image the same way. Type{" "}
             <strong>@</strong> to mention any panel from any page (e.g. "@Page 1 · Panel 2") to keep
             its room, decor, and props consistent here.
           </p>
@@ -1872,10 +1916,11 @@ function PanelEditor({
             characters={characters}
             places={places}
             objects={objects}
+            references={references}
             panels={allPanels.filter((p) => p.id !== panel.id)}
           />
-          {characters.length === 0 && places.length === 0 && objects.length === 0 && (
-            <p className="empty-hint">Add characters, places, or objects in the sidebar first.</p>
+          {characters.length === 0 && places.length === 0 && objects.length === 0 && references.length === 0 && (
+            <p className="empty-hint">Add characters, places, objects, or references in the sidebar first.</p>
           )}
 
           {error && <p className="error">{error}</p>}

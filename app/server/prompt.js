@@ -16,7 +16,15 @@ function describeFields(fields) {
     .join(", ");
 }
 
-export function buildPrompt({ sceneDescription, characters, places, objects, continuityPanels = [], stylePreset }) {
+export function buildPrompt({
+  sceneDescription,
+  characters,
+  places,
+  objects,
+  references = [],
+  continuityPanels = [],
+  stylePreset,
+}) {
   const parts = [sceneDescription?.trim() || "A manga panel."];
 
   if (characters.length) {
@@ -47,6 +55,13 @@ export function buildPrompt({ sceneDescription, characters, places, objects, con
     parts.push(
       "Objects present, matching their attached reference images exactly: " +
         objects.map((o) => o.name).join(", ") +
+        "."
+    );
+  }
+  if (references.length) {
+    parts.push(
+      "Additional reference images attached, matching them exactly wherever they apply: " +
+        references.map((r) => r.name).join(", ") +
         "."
     );
   }

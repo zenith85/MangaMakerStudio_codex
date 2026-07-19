@@ -21,6 +21,10 @@ function buildPanelItems(panels) {
   }));
 }
 
+function buildReferenceItems(references) {
+  return references.map((r) => ({ id: `references:${r.id}`, label: r.name, kind: "references", imageUrl: r.imageUrl }));
+}
+
 // `itemsRef` is read fresh by items() on every keystroke, so the suggestion list stays
 // current without rebuilding the Mention extension (and thus the editor) whenever the
 // underlying characters/places/objects/panels change.
@@ -60,17 +64,21 @@ function mentionSuggestion(char, itemsRef) {
   };
 }
 
-// Rich-text scene description for a panel. Two mention triggers: # opens a searchable
-// dropdown across this project's characters/places/objects; @ opens one across every
-// panel on every page (so you can anchor continuity — "match Page 1's Panel 2 room" —
-// without forcing every panel to inherit whatever came right before it). Picking one
-// inserts an inline, colored mention token. The resulting Tiptap doc (see onChange) is
-// the sole source of a panel's cast, setting, and continuity references —
-// parseSceneDoc (server/scene.js) pulls them back out regardless of which trigger
-// inserted them.
-export default function SceneEditor({ content, onChange, characters, places, objects, panels = [] }) {
+// Rich-text scene description for a panel. Three mention triggers: # opens a searchable
+// dropdown across this project's characters/places/objects; ! opens one across uploaded
+// reference images (plain pictures, no generation/fields — just extra visual references);
+// @ opens one across every panel on every page (so you can anchor continuity — "match
+// Page 1's Panel 2 room" — without forcing every panel to inherit whatever came right
+// before it). Picking one inserts an inline, colored mention token. The resulting Tiptap
+// doc (see onChange) is the sole source of a panel's cast, setting, and continuity
+// references — parseSceneDoc (server/scene.js) pulls them back out regardless of which
+// trigger inserted them.
+export default function SceneEditor({ content, onChange, characters, places, objects, references = [], panels = [] }) {
   const entitiesRef = useRef([]);
   entitiesRef.current = useMemo(() => buildEntityItems(characters, places, objects), [characters, places, objects]);
+
+  const referencesRef = useRef([]);
+  referencesRef.current = useMemo(() => buildReferenceItems(references), [references]);
 
   const panelsRef = useRef([]);
   panelsRef.current = useMemo(() => buildPanelItems(panels), [panels]);
@@ -80,7 +88,7 @@ export default function SceneEditor({ content, onChange, characters, places, obj
       StarterKit.configure({ heading: false }),
       Mention.configure({
         HTMLAttributes: { class: "mention-token" },
-        suggestions: [mentionSuggestion("#", entitiesRef), mentionSuggestion("@", panelsRef)],
+        suggestions: [mentionSuggestion("#", entitiesRef), mentionSuggestion("!", referencesRef), mentionSuggestion("@", panelsRef)],
       }),
     ],
     content,
