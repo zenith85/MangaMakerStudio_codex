@@ -53,4 +53,20 @@ export const api = {
   saveProjectPdf: (projectId, formData) => req(`/projects/${projectId}/pdf`, { method: "POST", body: formData }),
   openProjectFile: (projectId, relativePath) =>
     req(`/projects/${projectId}/open-file`, { method: "POST", ...json({ relativePath }) }),
+  // Returns a Blob (raw image bytes), not JSON like everything above — the edit
+  // candidate is a preview, not committed yet, so it doesn't go through `req`'s
+  // res.json() parsing.
+  requestPanelEdit: async (projectId, pageId, panelId, instructions) => {
+    const res = await fetch(`${BASE}/projects/${projectId}/pages/${pageId}/panels/${panelId}/edit`, {
+      method: "POST",
+      ...json({ instructions }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const err = new Error(body.error || res.statusText);
+      err.code = body.code;
+      throw err;
+    }
+    return res.blob();
+  },
 };

@@ -66,6 +66,20 @@ export function buildPrompt({ sceneDescription, characters, places, objects, con
   return parts.join(" ");
 }
 
+// Builds the prompt for editing an already-generated panel image, rather than composing
+// a new scene from scratch — the panel's CURRENT image is passed in as the sole reference
+// (see generateImageViaCodex's referenceImages param), so this only needs to describe the
+// change, not re-describe the whole scene.
+export function buildEditPrompt({ instructions, stylePreset }) {
+  const parts = [
+    "Edit the attached reference image — do not generate an unrelated new scene from scratch.",
+    `Requested change: ${instructions?.trim() || "Improve the image."}`,
+    "Keep everything else in the image the same (composition, characters, setting, style) except for what the requested change describes.",
+    STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw,
+  ];
+  return parts.join(" ");
+}
+
 const KIND_NOUN = { characters: "character", places: "place", objects: "object" };
 
 // Builds the prompt for generating a single reference asset (a character's

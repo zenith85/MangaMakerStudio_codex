@@ -30,7 +30,7 @@ import {
   panelImagePath,
 } from "./store.js";
 import { generateImageViaCodex, CodexError } from "./codex.js";
-import { buildPrompt, buildEntityPrompt } from "./prompt.js";
+import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
 import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -467,6 +467,34 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     savePages(projectId, pages);
 
     res.json({ ...withPanelImage(projectId, pageId, panel), prompt });
+  } catch (err) {
+    console.error(err);
+    if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Generates an EDITED candidate from the panel's current image + a text instruction,
+// via Codex — returned as raw image bytes, not committed to the panel. The frontend
+// shows it next to the original (before/after) and only calls the existing manual-image
+// endpoint to actually commit it if the user picks the edited version; picking "keep
+// original" just discards the response, nothing on disk ever changes for that case.
+app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
+  try {
+    const { projectId, pageId, panelId } = req.params;
+    const { instructions } = req.body;
+    const { page, panel } = findPanel(projectId, pageId, panelId);
+    if (!panel) return res.status(404).json({ error: "panel not found" });
+    if (!instructions?.trim()) return res.status(400).json({ error: "instructions are required" });
+
+    const currentImage = loadPanelImage(projectId, pageId, panel.id);
+    if (!currentImage) return res.status(400).json({ error: "panel has no image to edit" });
+
+    const prompt = buildEditPrompt({ instructions, stylePreset: page.stylePreset });
+    const imageBuf = await generateImageViaCodex(projectId, prompt, [currentImage]);
+
+    res.set("Content-Type", "image/png");
+    res.send(imageBuf);
   } catch (err) {
     console.error(err);
     if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });

@@ -1533,6 +1533,19 @@ function PanelEditor({
   const [imageBusy, setImageBusy] = useState(false);
   const fileInputRef = useRef(null);
   const [imageError, setImageError] = useState("");
+  const [editInstructions, setEditInstructions] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
+
+  // PanelEditor remounts per-panel (see key={selectedPanel.id} at the call site) so a
+  // stale candidate never shows for the wrong panel — this just avoids leaking the
+  // object URL itself when that remount/unmount happens.
+  useEffect(() => {
+    return () => {
+      if (editCandidate) URL.revokeObjectURL(editCandidate.url);
+    };
+  }, [editCandidate]);
 
   const generate = async () => {
     setBusy(true);
@@ -1575,6 +1588,37 @@ function PanelEditor({
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith("image/")) uploadImage(file);
+  };
+
+  // Sends the panel's CURRENT (already-committed) image to Codex as a reference, along
+  // with the requested change, and gets back a candidate — not committed anywhere yet.
+  // Shown next to the original so the user picks before anything on disk changes.
+  const requestEdit = async () => {
+    setEditBusy(true);
+    setEditError("");
+    try {
+      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editInstructions);
+      if (editCandidate) URL.revokeObjectURL(editCandidate.url);
+      setEditCandidate({ blob, url: URL.createObjectURL(blob) });
+    } catch (err) {
+      setEditError(err.message);
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const discardEdit = () => {
+    if (editCandidate) URL.revokeObjectURL(editCandidate.url);
+    setEditCandidate(null);
+    setEditInstructions("");
+  };
+
+  // Commits the edited candidate the same way a manual file upload would — it's just
+  // bytes from the user's point of view, whether they came from disk or from Codex.
+  const useEditedVersion = async () => {
+    if (!editCandidate) return;
+    await uploadImage(editCandidate.blob);
+    discardEdit();
   };
 
   const clearImage = async () => {
@@ -1718,6 +1762,48 @@ function PanelEditor({
           <button className="primary" onClick={generate} disabled={busy}>
             {busy ? "Generating…" : panel.hasImage ? "Regenerate panel" : "Generate panel"}
           </button>
+        </section>
+      )}
+
+      {tab === "scene" && panel.hasImage && (
+        <section className="panel-editor-lower">
+          <h4>Edit generated image</h4>
+          <p className="scene-editor-hint">
+            Describe a change to make to the panel's current image — Codex edits it as a
+            reference, not from scratch. Compare the result against the original below and
+            pick whichever one should actually be set on the panel; the other is discarded.
+          </p>
+          <textarea
+            className="edit-instructions-input"
+            placeholder='e.g. "make the sky sunset orange" or "remove the car in the background"'
+            value={editInstructions}
+            onChange={(e) => setEditInstructions(e.target.value)}
+            disabled={editBusy}
+          />
+          <button className="primary" onClick={requestEdit} disabled={editBusy || !editInstructions.trim()}>
+            {editBusy ? "Requesting edit…" : "Request edit"}
+          </button>
+
+          {editError && <p className="error">{editError}</p>}
+
+          {editCandidate && (
+            <div className="edit-compare">
+              <div className="edit-compare-option">
+                <span className="edit-compare-label">Before</span>
+                <img src={panel.imageUrl} alt="Before edit" />
+                <button onClick={discardEdit} disabled={imageBusy}>
+                  Keep this one
+                </button>
+              </div>
+              <div className="edit-compare-option">
+                <span className="edit-compare-label">After</span>
+                <img src={editCandidate.url} alt="After edit" />
+                <button className="primary" onClick={useEditedVersion} disabled={imageBusy}>
+                  Keep this one
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 

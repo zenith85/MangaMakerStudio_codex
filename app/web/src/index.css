@@ -622,6 +622,40 @@ button {
   flex-shrink: 0;
 }
 
+.edit-instructions-input {
+  min-height: 64px;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+
+.edit-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.edit-compare-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.edit-compare-option img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  background: #16171c;
+  border-radius: 8px;
+}
+
+.edit-compare-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #999;
+}
+
 .panel-editor-lower .primary {
   margin-bottom: 18px;
 }
