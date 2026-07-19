@@ -683,9 +683,16 @@ export default function App() {
     setPdfBusy(true);
     setPdfStatus("");
     setPdfSavedPath("");
+    // `pages` only gets refreshed by certain actions (creating/deleting a page, etc.) —
+    // bubble/scene edits update `currentPage` alone, so whichever page you were just
+    // editing can be stale here otherwise (missing whatever you just added). Same
+    // substitution as allPanelsForMention below, for the same reason. Declared outside
+    // the try so the finally block below (which restores whatever page was open before
+    // export) can use the same fresh data instead of reverting it back to stale.
+    const freshPages = pages.map((p) => (p.id === currentPage?.id ? currentPage : p));
     try {
       let pdf = null;
-      for (const page of pages) {
+      for (const page of freshPages) {
         setCurrentPage(page);
         await new Promise((r) => setTimeout(r, 50));
 
@@ -714,7 +721,7 @@ export default function App() {
     } catch (err) {
       setPdfStatus(`Failed: ${err.message}`);
     } finally {
-      const restored = pages.find((p) => p.id === hadPageId);
+      const restored = freshPages.find((p) => p.id === hadPageId);
       setCurrentPage(restored || null);
       setPdfBusy(false);
       if (hadSelection) setSelectedPanelId(hadSelection);
