@@ -550,16 +550,64 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;
-    const { instructions } = req.body;
-    const { page, panel } = findPanel(projectId, pageId, panelId);
+    const { instructions, sceneDoc } = req.body;
+    const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
-    if (!instructions?.trim()) return res.status(400).json({ error: "instructions are required" });
 
     const currentImage = loadPanelImage(projectId, pageId, panel.id);
     if (!currentImage) return res.status(400).json({ error: "panel has no image to edit" });
 
-    const prompt = buildEditPrompt({ instructions, stylePreset: page.stylePreset });
-    const imageBuf = await generateImageViaCodex(projectId, prompt, [currentImage]);
+    // sceneDoc (a Tiptap doc, like a panel's own scene description) carries any
+    // #/!/@-mentioned characters/places/objects/references/panels; plain `instructions`
+    // is kept as a fallback for callers that only send text.
+    const { plainText, characterIds, placeIds, objectIds, referenceIds, panelIds } = sceneDoc
+      ? parseSceneDoc(sceneDoc)
+      : { plainText: "", characterIds: [], placeIds: [], objectIds: [], referenceIds: [], panelIds: [] };
+    const finalInstructions = plainText || instructions;
+    if (!finalInstructions?.trim()) return res.status(400).json({ error: "instructions are required" });
+
+    const characters = characterIds.map((id) => getEntity(projectId, "characters", id)).filter(Boolean);
+    const places = placeIds.map((id) => getEntity(projectId, "places", id)).filter(Boolean);
+    const objects = objectIds.map((id) => getEntity(projectId, "objects", id)).filter(Boolean);
+    const references = referenceIds.map((id) => getEntity(projectId, "references", id)).filter(Boolean);
+    const continuityPanels = panelIds
+      .map((id) => {
+        for (const pg of pages) {
+          const found = pg.panels.find((p) => p.id === id);
+          if (found) return { ...found, pageId: pg.id, pageTitle: pg.title };
+        }
+        return null;
+      })
+      .filter(Boolean)
+      .map((p) => ({
+        order: p.order,
+        pageTitle: p.pageTitle,
+        plainText: parseSceneDoc(p.sceneDoc).plainText,
+        pageId: p.pageId,
+        panelId: p.id,
+      }));
+
+    // Panel being edited goes FIRST — buildEditPrompt tells Codex that's the edit
+    // target and everything after it is just for matching appearance.
+    const referenceImages = [
+      currentImage,
+      ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
+      ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
+      ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
+      ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
+      ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
+    ];
+
+    const prompt = buildEditPrompt({
+      instructions: finalInstructions,
+      characters,
+      places,
+      objects,
+      references,
+      continuityPanels,
+      stylePreset: page.stylePreset,
+    });
+    const imageBuf = await generateImageViaCodex(projectId, prompt, referenceImages);
 
     res.set("Content-Type", "image/png");
     res.send(imageBuf);

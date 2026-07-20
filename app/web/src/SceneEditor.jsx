@@ -32,8 +32,11 @@ function mentionSuggestion(char, itemsRef) {
   return {
     char,
     items: ({ query }) => {
+      // The list scrolls (.mention-list has max-height + overflow-y: auto), so an
+      // 8-item cap just silently hid everything past it with no query typed — e.g. any
+      // project with more than ~8 panels total would never show its later pages here.
       const q = query.toLowerCase();
-      return itemsRef.current.filter((e) => e.label.toLowerCase().includes(q)).slice(0, 8);
+      return itemsRef.current.filter((e) => e.label.toLowerCase().includes(q)).slice(0, 50);
     },
     render: () => {
       let component;

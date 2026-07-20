@@ -618,12 +618,6 @@ button {
   flex-shrink: 0;
 }
 
-.edit-instructions-input {
-  min-height: 64px;
-  resize: vertical;
-  margin-bottom: 10px;
-}
-
 .edit-compare {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -885,6 +879,7 @@ button {
   border-radius: 8px;
   padding: 10px 12px;
   min-height: 260px;
+  margin-bottom: 10px;
 }
 
 .scene-editor .tiptap {

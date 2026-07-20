@@ -285,6 +285,10 @@ const DIAGONAL_LAYOUTS = [
 
 LAYOUTS.push(...DIAGONAL_LAYOUTS);
 
+// Matches server/scene.js's EMPTY_SCENE_DOC — used here for the "Request edit"
+// instructions editor, which is a fresh Tiptap doc each time, not loaded from a panel.
+const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
+
 const STYLE_PRESETS = [
   { value: "manga_bw", label: "Manga (B&W, screentone detail)" },
   { value: "manga_simple", label: "Manga (B&W, simple/clean)" },
@@ -303,17 +307,21 @@ const ENTITY_KINDS = [
 // an uploaded picture — so EntityCreatorModal checks this to hide those sections.
 const GENERATABLE_ENTITY_KINDS = new Set(["characters", "places", "objects"]);
 
+// True if a Tiptap doc has any non-empty text or a mention anywhere in it — shared by
+// panelHasContent below and the "Request edit" button's disabled state, since an editDoc
+// is the same shape as a panel's sceneDoc.
+function docHasContent(node) {
+  if (!node) return false;
+  if (node.type === "mention") return true;
+  if (node.type === "text") return !!node.text?.trim();
+  return (node.content || []).some(docHasContent);
+}
+
 // True if a panel has a generated image or any non-empty scene text/mention — used to
 // warn before a layout change would drop it (see changeLayout in App()).
 function panelHasContent(panel) {
   if (panel.hasImage) return true;
-  const hasNodeContent = (node) => {
-    if (!node) return false;
-    if (node.type === "mention") return true;
-    if (node.type === "text") return !!node.text?.trim();
-    return (node.content || []).some(hasNodeContent);
-  };
-  return hasNodeContent(panel.sceneDoc);
+  return docHasContent(panel.sceneDoc);
 }
 
 // html2canvas doesn't reliably honor object-fit/object-position on <img> elements — it
@@ -1573,8 +1581,14 @@ function PanelThumb({
       startX: e.clientX,
       startY: e.clientY,
       startOffset: offset,
-      overflowX: Math.max(0, renderedW - frameW),
-      overflowY: Math.max(0, renderedH - frameH),
+      // SIGNED difference, not Math.max(0, ...) — when the image is smaller than the
+      // frame (zoomed below 1x) this is negative, which is what makes the offset
+      // formula below drag in the same direction as the mouse in that case too. Forcing
+      // it positive (as a "no overflow" fallback used to) flipped the drag direction
+      // specifically when zoomed out. The || frameW only guards the exact knife-edge
+      // where image size equals frame size, to avoid a literal divide-by-zero.
+      overflowX: renderedW - frameW || frameW,
+      overflowY: renderedH - frameH || frameH,
       moved: false,
     };
     window.addEventListener("pointermove", onPointerMove);
@@ -1589,8 +1603,12 @@ function PanelThumb({
     if (!d.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
     d.moved = true;
 
-    const nx = d.overflowX > 0 ? clamp(d.startOffset.x - (dx / d.overflowX) * 100, 0, 100) : 50;
-    const ny = d.overflowY > 0 ? clamp(d.startOffset.y - (dy / d.overflowY) * 100, 0, 100) : 50;
+    // No clamping — the frame's own overflow: hidden already crops whatever exits it,
+    // so dragging far enough to crop the image out entirely (or, when zoomed below 1x,
+    // to expose background on every side) is a deliberate, allowed outcome now, not
+    // something to prevent.
+    const nx = d.startOffset.x - (dx / d.overflowX) * 100;
+    const ny = d.startOffset.y - (dy / d.overflowY) * 100;
     d.lastOffset = { x: nx, y: ny };
     onDragImage(panel.id, d.lastOffset);
   };
@@ -1682,7 +1700,7 @@ function PanelEditor({
   const [imageBusy, setImageBusy] = useState(false);
   const fileInputRef = useRef(null);
   const [imageError, setImageError] = useState("");
-  const [editInstructions, setEditInstructions] = useState("");
+  const [editDoc, setEditDoc] = useState(EMPTY_DOC);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
@@ -1776,7 +1794,7 @@ function PanelEditor({
     setEditBusy(true);
     setEditError("");
     try {
-      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editInstructions);
+      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
     } catch (err) {
@@ -1789,7 +1807,7 @@ function PanelEditor({
   const discardEdit = () => {
     if (editCandidate) URL.revokeObjectURL(editCandidate.url);
     setEditCandidate(null);
-    setEditInstructions("");
+    setEditDoc(EMPTY_DOC);
   };
 
   // Commits the edited candidate the same way a manual file upload would — it's just
@@ -1870,6 +1888,13 @@ function PanelEditor({
           →
         </button>
       </div>
+
+      {tab === "scene" && (
+        <p className="scene-editor-hint">
+          <strong>#</strong> character/place/object, <strong>!</strong> reference image,{" "}
+          <strong>@</strong> another panel — in either editor below.
+        </p>
+      )}
 
       {tab === "image" && (
         <section className="panel-editor-upper panel-editor-image">
@@ -1987,13 +2012,6 @@ function PanelEditor({
       {tab === "scene" && (
         <section className="panel-editor-upper">
           <h4>Scene description</h4>
-          <p className="scene-editor-hint">
-            Type <strong>#</strong> to pull in a character, place, or object — it'll appear here
-            highlighted, and its reference image will be used when generating this panel. Type{" "}
-            <strong>!</strong> to pull in any uploaded reference image the same way. Type{" "}
-            <strong>@</strong> to mention any panel from any page (e.g. "@Page 1 · Panel 2") to keep
-            its room, decor, and props consistent here.
-          </p>
           <SceneEditor
             content={sceneDoc}
             onChange={setSceneDoc}
@@ -2018,19 +2036,20 @@ function PanelEditor({
       {tab === "scene" && panel.hasImage && (
         <section className="panel-editor-lower">
           <h4>Edit generated image</h4>
-          <p className="scene-editor-hint">
-            Describe a change to make to the panel's current image — Codex edits it as a
-            reference, not from scratch. Compare the result against the original below and
-            pick whichever one should actually be set on the panel; the other is discarded.
-          </p>
-          <textarea
-            className="edit-instructions-input"
-            placeholder='e.g. "make the sky sunset orange" or "remove the car in the background"'
-            value={editInstructions}
-            onChange={(e) => setEditInstructions(e.target.value)}
-            disabled={editBusy}
+          <SceneEditor
+            content={editDoc}
+            onChange={setEditDoc}
+            characters={characters}
+            places={places}
+            objects={objects}
+            references={references}
+            panels={allPanels.filter((p) => p.id !== panel.id)}
           />
-          <button className="primary" onClick={requestEdit} disabled={editBusy || !editInstructions.trim()}>
+          <button
+            className="primary"
+            onClick={requestEdit}
+            disabled={editBusy || !docHasContent(editDoc)}
+          >
             {editBusy ? "Requesting edit…" : "Request edit"}
           </button>
 

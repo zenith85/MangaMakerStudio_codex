@@ -16,17 +16,11 @@ function describeFields(fields) {
     .join(", ");
 }
 
-export function buildPrompt({
-  sceneDescription,
-  characters,
-  places,
-  objects,
-  references = [],
-  continuityPanels = [],
-  stylePreset,
-}) {
-  const parts = [sceneDescription?.trim() || "A manga panel."];
-
+// Shared between buildPrompt (a new scene) and buildEditPrompt (editing an existing
+// one) — both need to describe whichever characters/places/objects/references/continuity
+// panels got #/!/@-mentioned, just with different framing around it.
+function describeReferencedEntities({ characters = [], places = [], objects = [], references = [], continuityPanels = [] }) {
+  const parts = [];
   if (characters.length) {
     parts.push(
       "Cast: " +
@@ -77,21 +71,41 @@ export function buildPrompt({
         ". Match the room, decor, lighting, and any props exactly as shown in the attached reference image(s) for those panels, unless this panel's own description says something changed."
     );
   }
+  return parts;
+}
+
+export function buildPrompt({
+  sceneDescription,
+  characters,
+  places,
+  objects,
+  references = [],
+  continuityPanels = [],
+  stylePreset,
+}) {
+  const parts = [sceneDescription?.trim() || "A manga panel."];
+  parts.push(...describeReferencedEntities({ characters, places, objects, references, continuityPanels }));
   parts.push(STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw);
   return parts.join(" ");
 }
 
 // Builds the prompt for editing an already-generated panel image, rather than composing
-// a new scene from scratch — the panel's CURRENT image is passed in as the sole reference
-// (see generateImageViaCodex's referenceImages param), so this only needs to describe the
-// change, not re-describe the whole scene.
-export function buildEditPrompt({ instructions, stylePreset }) {
+// a new scene from scratch — the panel's CURRENT image is always passed as the FIRST
+// reference image (see generateImageViaCodex's referenceImages param), with any
+// #/!/@-mentioned characters/places/objects/references/panels following after it, so the
+// prompt has to spell out which reference image is actually the edit target.
+export function buildEditPrompt({ instructions, characters = [], places = [], objects = [], references = [], continuityPanels = [], stylePreset }) {
+  const entityParts = describeReferencedEntities({ characters, places, objects, references, continuityPanels });
   const parts = [
-    "Edit the attached reference image — do not generate an unrelated new scene from scratch.",
+    "Edit the FIRST attached reference image — that is the panel being edited; do not generate an unrelated new scene from scratch.",
     `Requested change: ${instructions?.trim() || "Improve the image."}`,
-    "Keep everything else in the image the same (composition, characters, setting, style) except for what the requested change describes.",
-    STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw,
+    "Keep everything else in that first image the same (composition, characters, setting, style) except for what the requested change describes.",
   ];
+  if (entityParts.length) {
+    parts.push("Any OTHER attached reference images (after the first) are only for matching these, not additional edit targets:");
+    parts.push(...entityParts);
+  }
+  parts.push(STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw);
   return parts.join(" ");
 }
 
