@@ -59,6 +59,11 @@ app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use("/projects", express.static(PROJECTS_DIR)); // serves .../<projectId>/<kind>/<entityId>/image.png directly
 
+// Lets the frontend tell whether a local agent is running on this visitor's own machine
+// at all (see the health-check in App.jsx) — distinct from any real route, so it stays
+// meaningful even as the rest of the API changes.
+app.get("/api/health", (req, res) => res.json({ ok: true }));
+
 // References are plain uploaded images (no Codex generation, no descriptive fields) —
 // they share the same generic CRUD as characters/places/objects, but ENTITY_KINDS is the
 // wider list used only for list/create/update/delete; GENERATABLE_KINDS below stays

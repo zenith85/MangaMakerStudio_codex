@@ -510,6 +510,25 @@ export default function App() {
   const [pdfSavedPath, setPdfSavedPath] = useState(""); // relative to the project folder; lets the "Open" button find it
   const pageCanvasRef = useRef(null);
 
+  // "checking" | "online" | "offline" — whether a local agent is running on THIS
+  // visitor's own machine (see api.js: every API call targets their own localhost, not
+  // wherever this page itself was served from). Without this, someone with no local
+  // agent running just sees every request silently fail with no explanation.
+  const [agentStatus, setAgentStatus] = useState("checking");
+  const [agentCheckAttempt, setAgentCheckAttempt] = useState(0);
+  const recheckAgent = () => {
+    setAgentStatus("checking");
+    setAgentCheckAttempt((n) => n + 1);
+  };
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    fetch("http://localhost:8787/api/health", { signal: controller.signal })
+      .then((res) => setAgentStatus(res.ok ? "online" : "offline"))
+      .catch(() => setAgentStatus("offline"))
+      .finally(() => clearTimeout(timeout));
+  }, [agentCheckAttempt]);
+
   const openSavedPdf = async () => {
     try {
       await api.openProjectFile(currentProjectId, pdfSavedPath);
@@ -798,6 +817,10 @@ export default function App() {
     .map((p) => (p.id === currentPage?.id ? currentPage : p))
     .flatMap((p) => p.panels.map((panel) => ({ ...panel, pageTitle: p.title })));
 
+  // ---------- Local agent not reachable / not yet checked ----------
+  if (agentStatus === "checking") return <div className="agent-checking">Checking for local agent…</div>;
+  if (agentStatus === "offline") return <DownloadPrompt onRetry={recheckAgent} />;
+
   // ---------- Landing: no project open yet ----------
   if (!currentProjectId) {
     return (
@@ -1053,6 +1076,36 @@ function TerminalOverlay({ show, projectId, onToggle }) {
         </div>
       )}
     </>
+  );
+}
+
+// Shown instead of the app when no local agent answers on this visitor's own machine
+// (see the health-check in App()). Download links point at files served from THIS same
+// host (public/downloads/), not GitHub — so a real visitor never needs a GitHub account.
+function DownloadPrompt({ onRetry }) {
+  return (
+    <div className="download-prompt">
+      <h1>Get the local app</h1>
+      <p>
+        This runs on your own computer — your projects, your Codex account, and the terminal all stay on your
+        machine, never on ours. Download and run it once, then come back here.
+      </p>
+      <div className="download-prompt-buttons">
+        <a href="/downloads/manga-agent-windows.zip">Download for Windows</a>
+        <a href="/downloads/manga-agent-linux.zip">Download for Linux</a>
+      </div>
+      <ol className="download-prompt-steps">
+        <li>Download the zip for your OS above and extract it.</li>
+        <li>
+          Run <code>manga-agent</code> (or <code>manga-agent.exe</code> on Windows) — a window/terminal will show it
+          running on <code>localhost:8787</code>.
+        </li>
+        <li>Come back to this page and click "Check again" below.</li>
+      </ol>
+      <button className="download-prompt-retry" onClick={onRetry}>
+        Check again
+      </button>
+    </div>
   );
 }
 
@@ -1811,6 +1864,7 @@ function PanelEditor({
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
+  const [showCopyFromPanel, setShowCopyFromPanel] = useState(false);
   // Live value while dragging the zoom slider or typing in either number box — null
   // means "not editing, show the committed panel value instead" (see the inputs below).
   const [zoomDraft, setZoomDraft] = useState(null);
@@ -1850,6 +1904,22 @@ function PanelEditor({
     } catch (err) {
       setImageError(err.message);
     } finally {
+      setImageBusy(false);
+    }
+  };
+
+  // Reuses uploadImage (a manual upload = a "redraw" too, same as a file picked from
+  // disk) — just fetches the source panel's already-generated image as a blob first
+  // instead of reading from a file input.
+  const copyFromPanel = async (sourcePanel) => {
+    setShowCopyFromPanel(false);
+    setImageBusy(true);
+    setImageError("");
+    try {
+      const blob = await fetch(sourcePanel.imageUrl).then((r) => r.blob());
+      await uploadImage(blob);
+    } catch (err) {
+      setImageError(err.message);
       setImageBusy(false);
     }
   };
@@ -2060,6 +2130,31 @@ function PanelEditor({
                 Open image location
               </button>
             )}
+            <div className="copy-from-panel-wrap">
+              <button
+                className="panel-image-action-btn"
+                onClick={() => setShowCopyFromPanel((v) => !v)}
+                disabled={imageBusy}
+              >
+                Copy from panel
+              </button>
+              {showCopyFromPanel && (
+                <div className="copy-from-panel-popover">
+                  {allPanels.filter((p) => p.id !== panel.id && p.hasImage).length === 0 ? (
+                    <p className="empty-hint">No other panels have an image yet.</p>
+                  ) : (
+                    allPanels
+                      .filter((p) => p.id !== panel.id && p.hasImage)
+                      .map((p) => (
+                        <button key={p.id} className="copy-from-panel-option" onClick={() => copyFromPanel(p)}>
+                          <img src={p.imageUrl} alt="" />
+                          <span>{p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`}</span>
+                        </button>
+                      ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {panel.hasImage && (
