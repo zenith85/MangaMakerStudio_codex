@@ -24,8 +24,10 @@ function getOrCreateSession(projectId) {
   if (session) return session;
 
   const cwd = key ? path.join(PROJECTS_DIR, key) : os.homedir();
-  const shell = process.env.SHELL || "/bin/bash";
-  const term = pty.spawn(shell, ["-l"], {
+  const isWindows = process.platform === "win32";
+  const shell = isWindows ? "powershell.exe" : (process.env.SHELL || "/bin/bash");
+  const args = isWindows ? [] : ["-l"];
+  const term = pty.spawn(shell, args, {
     name: "xterm-256color",
     cols: 80,
     rows: 24,
