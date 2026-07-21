@@ -6,6 +6,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
 const ENTITY_KINDS = ["characters", "places", "objects", "references"];
 
+// Absolute (not relative) so these still resolve correctly for a browser loading the
+// frontend from somewhere else entirely (a centrally-hosted UI) — "localhost" always
+// means the browser's OWN machine, which is where this local backend actually runs, so
+// this reaches the right place regardless of what origin served the page itself.
+const LOCAL_ORIGIN = `http://localhost:${process.env.PORT || 8787}`;
+
 fs.mkdirSync(PROJECTS_DIR, { recursive: true });
 
 function readJSON(p) {
@@ -162,7 +168,7 @@ export function loadEntityImage(projectId, kind, entityId) {
 }
 
 export function entityImageUrl(projectId, kind, entityId) {
-  return `/projects/${projectId}/${kind}/${entityId}/image.png`;
+  return `${LOCAL_ORIGIN}/projects/${projectId}/${kind}/${entityId}/image.png`;
 }
 
 // ---------- Pages: ProjectName/pages.json ----------
@@ -272,5 +278,8 @@ export function panelImageInfo(projectId, pageId, panelId) {
   const p = panelImagePath(projectId, pageId, panelId);
   if (!fs.existsSync(p)) return { hasImage: false, imageUrl: null };
   const v = Math.round(fs.statSync(p).mtimeMs);
-  return { hasImage: true, imageUrl: `/projects/${projectId}/pages/${pageId}/panels/${panelId}/image.png?v=${v}` };
+  return {
+    hasImage: true,
+    imageUrl: `${LOCAL_ORIGIN}/projects/${projectId}/pages/${pageId}/panels/${panelId}/image.png?v=${v}`,
+  };
 }

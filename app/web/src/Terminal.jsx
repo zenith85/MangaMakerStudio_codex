@@ -21,9 +21,11 @@ export default function Terminal({ projectId }) {
     term.open(containerRef.current);
     fitAddon.fit();
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // Hardcoded to localhost, not derived from window.location — the frontend may be
+    // served from somewhere else entirely, but the terminal bridge only ever runs on
+    // the browser's own machine (see api.js for the same reasoning on BASE).
     const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal${query}`);
+    const ws = new WebSocket(`ws://localhost:8787/ws/terminal${query}`);
 
     ws.addEventListener("open", () => {
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));

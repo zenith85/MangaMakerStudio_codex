@@ -1748,6 +1748,7 @@ function PanelThumb({
               src={panel.imageUrl}
               alt=""
               draggable={false}
+              crossOrigin="anonymous"
               onLoad={onImgLoad}
               style={{
                 position: "absolute",

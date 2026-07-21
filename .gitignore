@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 app/web/dist/
+app/server/dist-agent/
 
 # User-generated content (characters/places/objects, images) — kept local only,
 # grows large, and isn't something we want in version control.

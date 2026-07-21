@@ -1,4 +1,7 @@
-const BASE = "/api";
+// Absolute, not relative — the frontend may be served from somewhere else entirely (a
+// centrally-hosted UI), but "localhost" in a browser always means the browser's OWN
+// machine, which is where the actual local backend (storage/Codex/terminal) runs.
+const BASE = "http://localhost:8787/api";
 
 async function req(path, options = {}) {
   const res = await fetch(BASE + path, options);
