@@ -22,6 +22,7 @@ import {
   saveEntityImage,
   loadEntityImage,
   entityImageUrl,
+  entityImagePath,
   listPages,
   savePages,
   savePanelImage,
@@ -184,9 +185,8 @@ for (const kind of GENERATABLE_KINDS) {
       if (!entity) return res.status(404).json({ error: `${kind} not found` });
 
       const prompt = buildEntityPrompt({ kind, name: entity.name, fields: entity.fields, style: entity.style });
-      const imageBuf = await generateImageViaCodex(projectId, prompt);
+      await generateImageViaCodex(projectId, entityImagePath(projectId, kind, id), prompt);
 
-      saveEntityImage(projectId, kind, id, imageBuf);
       res.json({ ...withEntityUrl(projectId, kind, getEntity(projectId, kind, id)), prompt });
     } catch (err) {
       console.error(err);
@@ -529,9 +529,8 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       stylePreset: page.stylePreset,
     });
 
-    const imageBuf = await generateImageViaCodex(projectId, prompt, referenceImages);
+    await generateImageViaCodex(projectId, panelImagePath(projectId, pageId, panel.id), prompt, referenceImages);
 
-    savePanelImage(projectId, pageId, panel.id, imageBuf);
     savePages(projectId, pages);
 
     res.json({ ...withPanelImage(projectId, pageId, panel), prompt });
@@ -607,7 +606,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       continuityPanels,
       stylePreset: page.stylePreset,
     });
-    const imageBuf = await generateImageViaCodex(projectId, prompt, referenceImages);
+    const imageBuf = await generateImageViaCodex(projectId, null, prompt, referenceImages);
 
     res.set("Content-Type", "image/png");
     res.send(imageBuf);

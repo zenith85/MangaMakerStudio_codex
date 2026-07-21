@@ -360,17 +360,27 @@ async function precropPanelImages(container) {
       sy = (img.naturalHeight - sh) * (offsetY / 100);
     }
 
+    // Brightness (see the brightness slider in the panel editor) is baked into the
+    // canvas pixels here too — html2canvas doesn't reliably honor CSS filter either, and
+    // baking it now (then clearing the live style below) also avoids it getting applied
+    // twice: once here, once again by the browser rendering the swapped-in img's own
+    // inline filter during capture.
+    const filter = getComputedStyle(img).filter;
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(cw * 2));
     canvas.height = Math.max(1, Math.round(ch * 2));
-    canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const ctx = canvas.getContext("2d");
+    if (filter && filter !== "none") ctx.filter = filter;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/png");
 
     const originalSrc = img.src;
     const originalObjectPosition = img.style.objectPosition;
+    const originalFilter = img.style.filter;
     restores.push(() => {
       img.src = originalSrc;
       img.style.objectPosition = originalObjectPosition;
+      img.style.filter = originalFilter;
     });
 
     await new Promise((resolve) => {
@@ -378,6 +388,7 @@ async function precropPanelImages(container) {
       img.src = dataUrl;
     });
     img.style.objectPosition = "50% 50%";
+    img.style.filter = "none";
   }
 
   return () => restores.forEach((fn) => fn());
@@ -801,16 +812,8 @@ export default function App() {
     );
   }
 
-  // Inside a project, the terminal must occupy only the center column — never
-  // overlapping the sidebar or the panel editor, which are genuinely separate regions.
   const terminalToggle = (
-    <TerminalOverlay
-      show={showTerminal}
-      projectId={currentProjectId}
-      onToggle={() => setShowTerminal((v) => !v)}
-      leftInset={280} // .sidebar width
-      rightInset={selectedPanel ? 460 : 0} // .panel-editor width, only when it's open
-    />
+    <TerminalOverlay show={showTerminal} projectId={currentProjectId} onToggle={() => setShowTerminal((v) => !v)} />
   );
 
   return (
@@ -931,20 +934,122 @@ export default function App() {
   );
 }
 
-// Floating toggle + docked panel for the embedded terminal (see Terminal.jsx). The
-// underlying shell session lives server-side per project — closing this panel just
-// detaches the viewer (Generate can still write into it); reopening reattaches to the
-// same running session. `key={projectId}` forces a fresh viewer connection when you
-// switch projects, so it attaches to that project's session instead of the old one.
-function TerminalOverlay({ show, projectId, onToggle, leftInset = 0, rightInset = 0 }) {
+const TERMINAL_DEFAULT_SIZE = { width: 640, height: 380 };
+const TERMINAL_MIN_SIZE = { width: 320, height: 180 };
+
+// Floating, draggable, resizable window for the embedded terminal (see Terminal.jsx).
+// Floats above the rest of the app (but stays below modals — a confirmation dialog
+// must never end up hidden behind it). The underlying shell session lives server-side
+// per project — closing this window just detaches the viewer (Generate can still write
+// into it); reopening reattaches to the same running session. `key={projectId}` forces
+// a fresh viewer connection when you switch projects, so it attaches to that project's
+// session instead of the old one.
+function TerminalOverlay({ show, projectId, onToggle }) {
+  const [pos, setPos] = useState(() => ({
+    x: Math.max(20, window.innerWidth - TERMINAL_DEFAULT_SIZE.width - 20),
+    y: Math.max(20, window.innerHeight - TERMINAL_DEFAULT_SIZE.height - 60),
+  }));
+  const [size, setSize] = useState(TERMINAL_DEFAULT_SIZE);
+  const [minimized, setMinimized] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+  const restoreRef = useRef(null);
+  const dragRef = useRef(null);
+  const resizeRef = useRef(null);
+
+  const onTitleMouseDown = (e) => {
+    if (maximized || minimized || e.target.closest("button")) return;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startPosX: pos.x, startPosY: pos.y };
+    const onMove = (ev) => {
+      const { startX, startY, startPosX, startPosY } = dragRef.current;
+      // Keeps the whole window on screen, not just its top-left edge — the titlebar's
+      // buttons live on the right, and the resize handle lives at the bottom-right
+      // corner, so clamping only one edge could push either out of reach.
+      setPos({
+        x: clamp(startPosX + (ev.clientX - startX), 0, Math.max(0, window.innerWidth - size.width)),
+        y: clamp(startPosY + (ev.clientY - startY), 0, Math.max(0, window.innerHeight - size.height)),
+      });
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const onResizeMouseDown = (e) => {
+    if (maximized) return;
+    e.stopPropagation();
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: size.width, startHeight: size.height };
+    const onMove = (ev) => {
+      const { startX, startY, startWidth, startHeight } = resizeRef.current;
+      // Capped against the viewport edges too (not just a minimum) — otherwise growing
+      // the window past the screen edge pushes its own titlebar buttons out of reach,
+      // same failure as the uncapped drag bug above.
+      setSize({
+        width: clamp(startWidth + (ev.clientX - startX), TERMINAL_MIN_SIZE.width, window.innerWidth - pos.x),
+        height: clamp(startHeight + (ev.clientY - startY), TERMINAL_MIN_SIZE.height, window.innerHeight - pos.y),
+      });
+    };
+    const onUp = () => {
+      resizeRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const toggleMaximize = () => {
+    if (maximized) {
+      if (restoreRef.current) {
+        setPos(restoreRef.current.pos);
+        setSize(restoreRef.current.size);
+      }
+      setMaximized(false);
+    } else {
+      restoreRef.current = { pos, size };
+      setPos({ x: 20, y: 20 });
+      setSize({ width: window.innerWidth - 40, height: window.innerHeight - 40 });
+      setMaximized(true);
+    }
+  };
+
   return (
     <>
-      <button className="terminal-toggle" style={{ right: rightInset + 12 }} onClick={onToggle}>
+      <button className="terminal-toggle" onClick={onToggle}>
         {show ? "▼ Terminal" : "▲ Terminal"}
       </button>
       {show && (
-        <div className="terminal-panel" style={{ left: leftInset, right: rightInset }}>
-          <Terminal key={projectId} projectId={projectId} />
+        <div
+          className="terminal-window"
+          style={
+            minimized
+              ? { left: pos.x, bottom: 12, width: size.width, height: undefined }
+              : { left: pos.x, top: pos.y, width: size.width, height: size.height }
+          }
+        >
+          <div className="terminal-window-titlebar" onMouseDown={onTitleMouseDown}>
+            <span>Terminal</span>
+            <div className="terminal-window-controls">
+              <button title={minimized ? "Restore" : "Minimize"} onClick={() => setMinimized((v) => !v)}>
+                {minimized ? "▢" : "—"}
+              </button>
+              <button title={maximized ? "Restore" : "Maximize"} onClick={toggleMaximize}>
+                {maximized ? "❐" : "□"}
+              </button>
+              <button title="Close" onClick={onToggle}>
+                ✕
+              </button>
+            </div>
+          </div>
+          {!minimized && (
+            <div className="terminal-window-body">
+              <Terminal key={projectId} projectId={projectId} />
+            </div>
+          )}
+          {!minimized && !maximized && <div className="terminal-window-resize-handle" onMouseDown={onResizeMouseDown} />}
         </div>
       )}
     </>
@@ -1652,6 +1757,7 @@ function PanelThumb({
                 height: renderedH,
                 transform: `rotate(${rotate}deg) scale(${rotateScale})`,
                 transformOrigin: `${rotateOriginX}px ${rotateOriginY}px`,
+                filter: `brightness(${panel.imageBrightness ?? 100}%)`,
               }}
             />
           </>
@@ -1708,6 +1814,7 @@ function PanelEditor({
   // means "not editing, show the committed panel value instead" (see the inputs below).
   const [zoomDraft, setZoomDraft] = useState(null);
   const [rotateDraft, setRotateDraft] = useState(null);
+  const [brightnessDraft, setBrightnessDraft] = useState(null);
 
   // PanelEditor remounts per-panel (see key={selectedPanel.id} at the call site) so a
   // stale candidate never shows for the wrong panel — this just avoids leaking the
@@ -1775,6 +1882,14 @@ function PanelEditor({
   const commitZoom = async (value) => {
     await api.updatePanel(projectId, page.id, panel.id, { imageScale: value });
     setZoomDraft(null);
+    await onUpdated();
+  };
+
+  // 100 = untouched. Generation sometimes comes out overexposed, so this exists purely
+  // to dim/darken the result after the fact rather than needing to regenerate.
+  const commitBrightness = async (value) => {
+    await api.updatePanel(projectId, page.id, panel.id, { imageBrightness: value });
+    setBrightnessDraft(null);
     await onUpdated();
   };
 
@@ -1995,6 +2110,38 @@ function PanelEditor({
                   onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
                 />
                 <span className="panel-zoom-value">×</span>
+              </label>
+              <label className="panel-zoom-control">
+                Brightness
+                <input
+                  type="range"
+                  min="40"
+                  max="160"
+                  step="1"
+                  value={brightnessDraft ?? (panel.imageBrightness ?? 100)}
+                  onChange={(e) => {
+                    setBrightnessDraft(e.target.value);
+                    onLiveUpdate(panel.id, { imageBrightness: parseFloat(e.target.value) });
+                  }}
+                  onMouseUp={(e) => commitBrightness(parseFloat(e.target.value))}
+                  onTouchEnd={(e) => commitBrightness(parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="panel-number-input"
+                  min="40"
+                  max="160"
+                  step="1"
+                  value={brightnessDraft ?? (panel.imageBrightness ?? 100)}
+                  onChange={(e) => {
+                    setBrightnessDraft(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageBrightness: v });
+                  }}
+                  onBlur={(e) => commitBrightness(clamp(parseFloat(e.target.value) || 100, 40, 160))}
+                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                />
+                <span className="panel-zoom-value">%</span>
               </label>
             </div>
           )}

@@ -1316,17 +1316,81 @@ button.primary:disabled {
   font-size: 13px;
 }
 
-.terminal-panel {
+/* Floating window — sits above the app's own content but below .modal-backdrop (30),
+   so a confirmation dialog can never end up hidden behind it. */
+.terminal-window {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 340px;
+  display: flex;
+  flex-direction: column;
   background: #0d0e12;
-  border-top: 1px solid #2a2b33;
-  z-index: 19;
+  border: 1px solid #2a2b33;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 29;
+  overflow: hidden;
+}
+
+.terminal-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #1c1d24;
+  border-bottom: 1px solid #2a2b33;
+  font-size: 12px;
+  color: #aeb0bd;
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.terminal-window-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-window-controls button {
+  background: none;
+  border: none;
+  color: #aeb0bd;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.terminal-window-controls button:hover {
+  background: #2a2b33;
+  color: #fff;
+}
+
+.terminal-window-body {
+  flex: 1;
   padding: 8px;
   box-sizing: border-box;
+  min-height: 0;
+}
+
+.terminal-window-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+}
+
+.terminal-window-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #4a4b57;
+  border-bottom: 2px solid #4a4b57;
 }
 
 .terminal-container {

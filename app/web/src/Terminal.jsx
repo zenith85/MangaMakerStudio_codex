@@ -39,16 +39,20 @@ export default function Terminal({ projectId }) {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
     });
 
+    // Watches the container element itself (not just window resize) so dragging or
+    // resizing the floating terminal window — which doesn't change the browser
+    // window's size — still re-fits xterm to the new dimensions.
     const handleResize = () => {
       fitAddon.fit();
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       }
     };
-    window.addEventListener("resize", handleResize);
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(containerRef.current);
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       dataListener.dispose();
       ws.close();
       term.dispose();
