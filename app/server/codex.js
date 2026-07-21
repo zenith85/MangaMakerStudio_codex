@@ -18,9 +18,16 @@ export class CodexError extends Error {}
 // The prompt/paths are built from user-entered content (character names, fields,
 // style) and now get written as literal keystrokes into a real shell (see
 // terminal.js), not passed as an isolated argv element — so they must be quoted to
-// prevent shell injection (e.g. a character named `"; rm -rf ~ #`).
+// prevent shell injection (e.g. a character named `"; rm -rf ~ #`). Quoting rules
+// differ by shell: PowerShell (Windows) escapes an embedded ' by doubling it, while
+// bash/sh (Linux/macOS) has no in-quote escape and needs the close-escape-reopen
+// trick instead.
 function shellQuote(value) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  const str = String(value);
+  if (process.platform === "win32") {
+    return `'${str.replace(/'/g, "''")}'`;
+  }
+  return `'${str.replace(/'/g, `'\\''`)}'`;
 }
 
 function newestFileUnder(dir, extension, newerThanMs) {
