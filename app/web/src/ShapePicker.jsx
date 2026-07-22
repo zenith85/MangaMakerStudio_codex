@@ -9,7 +9,22 @@ import {
   isDashed,
   isSharpCornered,
   pointsToString,
+  ascendFontSize,
 } from "./Bubble";
+
+// Noise/SFX shapes have no bubble outline at all (see hasNoBackground in Bubble.jsx) —
+// an outline-only preview would render as literally nothing, so these show sample bold
+// lettering instead, tuned to look like the real .bubble-text-noise-* CSS treatment, so
+// Loud vs. Normal's outline weight actually reads as distinct in the dropdown.
+const NOISE_PREVIEWS = {
+  noiseLoud: { label: "BOOM", fontSize: 28, strokeWidth: 5, weight: 900 },
+  noiseNormal: { label: "POW", fontSize: 24, strokeWidth: 2.5, weight: 700 },
+};
+// Ascend can't use a single fontSize like the other noise previews — its whole point is
+// each letter growing past the last — so it gets its own branch below, one <tspan> per
+// letter of the same demo word, each sized by the real growth formula (ascendFontSize).
+const ASCEND_PREVIEW_LABEL = "BOOM";
+const ASCEND_PREVIEW_BASE_SIZE = 12;
 
 // A standalone rendering of a shape's outline (reusing the exact same boundary+tail
 // geometry the real bubble uses), for showing what a shape actually looks like rather
@@ -17,6 +32,52 @@ import {
 // draws a short demo tail — as a merged spike or trailing dots, whichever that shape
 // actually uses — so the preview reads as a real speech bubble.
 function ShapePreview({ shape, withTail, size }) {
+  const resolved = resolveShape(shape);
+  const noise = NOISE_PREVIEWS[resolved];
+  if (noise) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: "visible", flexShrink: 0 }}>
+        <text
+          x="50"
+          y="60"
+          textAnchor="middle"
+          fontFamily="'Bangers', cursive"
+          fontWeight={noise.weight}
+          fontSize={noise.fontSize}
+          paintOrder="stroke"
+          fill="#ffffff"
+          stroke="#1a1a1a"
+          strokeWidth={noise.strokeWidth}
+        >
+          {noise.label}
+        </text>
+      </svg>
+    );
+  }
+  if (resolved === "noiseAscend") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: "visible", flexShrink: 0 }}>
+        <text
+          x="50"
+          y="65"
+          textAnchor="middle"
+          fontFamily="'Bangers', cursive"
+          fontWeight={700}
+          paintOrder="stroke"
+          fill="#ffffff"
+          stroke="#1a1a1a"
+          strokeWidth={2.5}
+        >
+          {Array.from(ASCEND_PREVIEW_LABEL).map((ch, i) => (
+            <tspan key={i} fontSize={ascendFontSize(ASCEND_PREVIEW_BASE_SIZE, i)}>
+              {ch}
+            </tspan>
+          ))}
+        </text>
+      </svg>
+    );
+  }
+
   const boundary = boundaryFor(shape);
   const demoBubble = { x: 0, y: 0, width: 100, height: 100, tail: withTail ? { x: 15, y: 135 } : null };
   const tailStyle = tailStyleFor(shape);

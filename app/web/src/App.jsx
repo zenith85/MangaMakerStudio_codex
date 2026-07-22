@@ -15,6 +15,7 @@ import Bubble, {
   dotTrailPoints,
   isDashed,
   isSharpCornered,
+  hasNoBackground,
 } from "./Bubble";
 import ShapePicker from "./ShapePicker";
 
@@ -454,18 +455,23 @@ function precropBubbleOutlines(container, page) {
       const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
       const avgScale = (bw + bh) / 2 / 100; // dot radii are in the same 0-100 local units as the boundary
 
-      ctx.save();
-      ctx.beginPath();
-      outline.forEach((p, idx) => (idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-      ctx.closePath();
-      ctx.fillStyle = "white";
-      ctx.fill();
-      ctx.lineJoin = isSharpCornered(bubble.shape) ? "miter" : "round";
-      ctx.setLineDash(isDashed(bubble.shape) ? [5, 4] : []);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#1a1a1a";
-      ctx.stroke();
-      ctx.restore();
+      // Noise/SFX bubbles have no bubble fill or outline at all (see hasNoBackground in
+      // Bubble.jsx) — painting the usual white box here would put an opaque rectangle
+      // behind their hollow text in the exported PDF that never shows on screen.
+      if (!hasNoBackground(bubble.shape)) {
+        ctx.save();
+        ctx.beginPath();
+        outline.forEach((p, idx) => (idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.closePath();
+        ctx.fillStyle = "white";
+        ctx.fill();
+        ctx.lineJoin = isSharpCornered(bubble.shape) ? "miter" : "round";
+        ctx.setLineDash(isDashed(bubble.shape) ? [5, 4] : []);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#1a1a1a";
+        ctx.stroke();
+        ctx.restore();
+      }
 
       for (const d of dots) {
         const p = toScreen(d);
@@ -2031,6 +2037,12 @@ function PanelEditor({
   const setBubbleFontSize = (bubbleId, fontSize) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, fontSize } : b)));
   };
+  const setBubbleBold = (bubbleId, bold) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, bold } : b)));
+  };
+  const setBubbleTextRotate = (bubbleId, textRotate) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, textRotate } : b)));
+  };
   const removeBubble = (bubbleId) => {
     onCommitBubbles(panel.id, bubbles.filter((b) => b.id !== bubbleId));
   };
@@ -2368,6 +2380,20 @@ function PanelEditor({
                     value={b.fontSize || DEFAULT_FONT_SIZE}
                     onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 60))}
                   />
+                </label>
+                <label className="bubble-list-font-size">
+                  Text rotation
+                  <input
+                    type="number"
+                    min="-180"
+                    max="180"
+                    value={b.textRotate || 0}
+                    onChange={(e) => setBubbleTextRotate(b.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
+                  />
+                </label>
+                <label className="bubble-list-bold">
+                  <input type="checkbox" checked={!!b.bold} onChange={(e) => setBubbleBold(b.id, e.target.checked)} />
+                  Bold
                 </label>
               </div>
             ))}

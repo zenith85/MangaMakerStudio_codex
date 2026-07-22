@@ -11,6 +11,9 @@ export const SHAPES = [
   { value: "digital", label: "Digital" },
   { value: "dreamy", label: "Dreamy" },
   { value: "caption", label: "Caption" },
+  { value: "noiseLoud", label: "Noise (Loud)" },
+  { value: "noiseNormal", label: "Noise (Normal)" },
+  { value: "noiseAscend", label: "Noise (Ascend)" },
 ];
 
 // Old shape values from before this library expanded — resolved everywhere shape is
@@ -31,6 +34,60 @@ export function tailStyleFor(shape) {
 const DASHED_SHAPES = new Set(["whisper"]);
 export function isDashed(shape) {
   return DASHED_SHAPES.has(resolveShape(shape));
+}
+
+// Ambient sound-effect lettering (onomatopoeia like "BOOM" or "POW") — unlike dialogue,
+// these sit directly on the panel art with no bubble around them at all, so their outline
+// polygon is only used for text clipping/tail placement and must render with no fill or
+// stroke of its own (see the .bubble-text-noise-* CSS classes for the bold-outline look,
+// and precropBubbleOutlines in App.jsx, which must skip painting these during PDF export).
+const NO_BACKGROUND_SHAPES = new Set(["noiseLoud", "noiseNormal", "noiseAscend"]);
+export function hasNoBackground(shape) {
+  return NO_BACKGROUND_SHAPES.has(resolveShape(shape));
+}
+
+// Which of the noise styles' bold-outline treatment (weight/stroke — see index.css) a
+// bubble's text should get. Non-noise shapes get none, so their text stays solid, sitting
+// on the bubble's own fill.
+const NOISE_TEXT_CLASS = {
+  noiseLoud: "bubble-text-noise-loud",
+  noiseNormal: "bubble-text-noise-normal",
+  noiseAscend: "bubble-text-noise-ascend",
+};
+export function noiseTextClass(shape) {
+  return NOISE_TEXT_CLASS[resolveShape(shape)] || "";
+}
+
+// "Ascend" grows each successive letter of a noise bubble's text, so a word like "Hello"
+// reads H < e < l < l < o — the comic convention for a sound building as it goes. Growth
+// is capped so a long sentence typed into an ascend bubble doesn't run away in size.
+export function isAscendShape(shape) {
+  return resolveShape(shape) === "noiseAscend";
+}
+const ASCEND_GROWTH_PER_CHAR = 0.16;
+const ASCEND_MAX_MULTIPLIER = 2.6;
+export function ascendFontSize(baseSize, charIndex) {
+  return baseSize * Math.min(1 + charIndex * ASCEND_GROWTH_PER_CHAR, ASCEND_MAX_MULTIPLIER);
+}
+
+// Splits ascend text into per-line, per-character spans, each sized by its position in
+// the overall sequence (not reset per line) so growth carries across a wrapped/multi-line
+// bubble. Each line is its own block so newlines still break the line, same as plain text.
+export function renderAscendText(text, baseSize) {
+  let globalIndex = 0;
+  return text.split("\n").map((line, lineIdx) => (
+    <span className="bubble-text-ascend-line" key={lineIdx}>
+      {Array.from(line).map((ch, charIdx) => {
+        const size = ascendFontSize(baseSize, globalIndex);
+        globalIndex += 1;
+        return (
+          <span key={charIdx} style={{ fontSize: `${size}px` }}>
+            {ch === " " ? " " : ch}
+          </span>
+        );
+      })}
+    </span>
+  ));
 }
 
 // Free (SIL OFL / Apache 2.0), self-hosted under public/fonts — see public/fonts/LICENSES
@@ -189,6 +246,9 @@ function steppedRectangleBoundary(segmentsPerEdge = 4, notchDepth = 9) {
 export function boundaryFor(shape) {
   switch (resolveShape(shape)) {
     case "caption":
+    case "noiseLoud":
+    case "noiseNormal":
+    case "noiseAscend":
       return rectangleBoundary();
     case "digital":
       return steppedRectangleBoundary();
@@ -316,6 +376,12 @@ function rotateAroundPoint(p, center, deg) {
   return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos };
 }
 
+// Wraps a degree value into (-180, 180] — used for the text-rotate handle, so dragging
+// past the seam (e.g. from 179° to -179°) reads as a small step rather than a 358° jump.
+function normalizeSignedDegrees(deg) {
+  return ((((deg + 180) % 360) + 360) % 360) - 180;
+}
+
 function startPointerDrag(e, onMove, onEnd) {
   e.preventDefault();
   e.stopPropagation();
@@ -416,6 +482,29 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     onChange({ rotate: (rotate + 90) % 360 }, { commit: true });
   };
 
+  // Lets textRotate be set by dragging, not just typing a number (see the sidebar's "Text
+  // rotation" field) — same trick as dragTail: read the pointer in absolute panel-percent
+  // space, then undo the bubble's own shape rotation so what's stored is the text's angle
+  // alone, not a mix of the two. 0° is "straight up" (see displayTextRotateHandle below),
+  // matching how a rotation handle conventionally starts, so +90 puts that back to 0deg.
+  const dragTextRotate = (e) => {
+    const rect = containerRect();
+    let lastPatch = {};
+    startPointerDrag(
+      e,
+      (ev) => {
+        const px = ((ev.clientX - rect.left) / rect.width) * 100;
+        const py = ((ev.clientY - rect.top) / rect.height) * 100;
+        const local = rotateAroundPoint({ x: px, y: py }, center, -rotate);
+        const angleDeg = (Math.atan2(local.y - center.y, local.x - center.x) * 180) / Math.PI;
+        const textRotate = Math.round(normalizeSignedDegrees(angleDeg + 90));
+        lastPatch = { textRotate };
+        onChange(lastPatch, { commit: false });
+      },
+      () => onChange(lastPatch, { commit: true })
+    );
+  };
+
   const commitText = (text) => {
     setEditingText(false);
     onChange({ text }, { commit: true });
@@ -438,10 +527,32 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
   const outline = tailStyle === "spike" ? outlineWithTail(boundary, bubble) : boundary;
   const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
   const dashed = isDashed(bubble.shape);
+  const noBackground = hasNoBackground(bubble.shape);
+  // font-weight: bold only has something to switch to on fonts that actually ship a bold
+  // face (Comic Neue does; Bangers/Permanent Marker/Shojumaru/Reggae One are single-weight
+  // display fonts with no bold variant to synthesize, so the browser renders them
+  // identically either way) — a thin same-color text-stroke thickens the glyphs directly,
+  // so Bold has a visible effect regardless of which font is picked. Noise bubbles already
+  // render their own thick outline via .bubble-text-noise-* and set their own -webkit-text-
+  // stroke, so this would just clobber that (inline style always wins over the class).
+  const boldStroke = bubble.bold && !noBackground ? "0.6px currentColor" : undefined;
   // The tail-drag handle is a sibling of .bubble, not a child, so it isn't carried along
   // by that div's CSS rotation — its on-screen position has to be rotated to match by
   // hand (the inverse of what dragTail un-rotates when storing a new tail point).
   const displayTail = bubble.tail ? rotateAroundPoint(bubble.tail, center, rotate) : null;
+
+  // The text-rotate handle has no stored position of its own (unlike the tail) — it just
+  // orbits the bubble at a fixed radius, at the angle textRotate represents. 0° sits
+  // straight up (angle -90° in atan2's convention, where 0=right and 90=down), matching
+  // where dragTextRotate reads it back from; then the bubble's own shape rotation is
+  // applied on top, same as the tail handle, so it visually stays put relative to the box.
+  const textRotateHandleRadius = Math.max(bubble.width, bubble.height) / 2 + 6;
+  const textRotateAngleRad = (((bubble.textRotate || 0) - 90) * Math.PI) / 180;
+  const localTextRotateHandle = {
+    x: center.x + textRotateHandleRadius * Math.cos(textRotateAngleRad),
+    y: center.y + textRotateHandleRadius * Math.sin(textRotateAngleRad),
+  };
+  const displayTextRotateHandle = rotateAroundPoint(localTextRotateHandle, center, rotate);
 
   return (
     <>
@@ -456,7 +567,10 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             points={pointsToString(outline)}
             vectorEffect="non-scaling-stroke"
             strokeDasharray={dashed ? "5 4" : undefined}
-            style={isSharpCornered(bubble.shape) ? { strokeLinejoin: "miter" } : undefined}
+            style={{
+              ...(isSharpCornered(bubble.shape) ? { strokeLinejoin: "miter" } : null),
+              ...(noBackground ? { fill: "none", stroke: "none" } : null),
+            }}
           />
           {dots.map((d, i) => (
             <circle key={i} cx={d.x} cy={d.y} r={d.r} vectorEffect="non-scaling-stroke" />
@@ -467,7 +581,13 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
           {editingText ? (
             <textarea
               className="bubble-text-input"
-              style={{ fontFamily: fontFamilyFor(bubble.font), fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px` }}
+              style={{
+                fontFamily: fontFamilyFor(bubble.font),
+                fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
+                fontWeight: bubble.bold ? "bold" : undefined,
+                WebkitTextStroke: boldStroke,
+                transform: bubble.textRotate ? `rotate(${bubble.textRotate}deg)` : undefined,
+              }}
               defaultValue={bubble.text}
               autoFocus
               onPointerDown={(e) => e.stopPropagation()}
@@ -478,10 +598,18 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             />
           ) : (
             <div
-              className="bubble-text"
-              style={{ fontFamily: fontFamilyFor(bubble.font), fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px` }}
+              className={`bubble-text${noiseTextClass(bubble.shape) ? ` ${noiseTextClass(bubble.shape)}` : ""}`}
+              style={{
+                fontFamily: fontFamilyFor(bubble.font),
+                fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
+                fontWeight: bubble.bold ? "bold" : undefined,
+                WebkitTextStroke: boldStroke,
+                transform: bubble.textRotate ? `rotate(${bubble.textRotate}deg)` : undefined,
+              }}
             >
-              {bubble.text}
+              {isAscendShape(bubble.shape)
+                ? renderAscendText(bubble.text, bubble.fontSize || DEFAULT_FONT_SIZE)
+                : bubble.text}
             </div>
           )}
         </div>
@@ -510,6 +638,17 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
           style={{ left: `${displayTail.x}%`, top: `${displayTail.y}%` }}
           onPointerDown={dragTail}
         />
+      )}
+
+      {editable && !editingText && (
+        <div
+          className="bubble-text-rotate-handle"
+          style={{ left: `${displayTextRotateHandle.x}%`, top: `${displayTextRotateHandle.y}%` }}
+          onPointerDown={dragTextRotate}
+          title="Drag to rotate text"
+        >
+          ↻
+        </div>
       )}
     </>
   );
