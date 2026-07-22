@@ -329,8 +329,19 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
   const page = pages.find((p) => p.id === pageId);
   if (!page) return res.status(404).json({ error: "page not found" });
 
-  const { layout, panelCount } = req.body;
-  if (layout) page.layout = layout;
+  const { layout, panelCount, gridColumns, gridRows } = req.body;
+  if (layout) {
+    page.layout = layout;
+    // A different layout has an entirely different grid-area structure, so any hand-
+    // dragged track sizes from the previous one no longer correspond to anything —
+    // drop them and let the new layout's own template columns/rows apply.
+    delete page.gridColumns;
+    delete page.gridRows;
+  }
+  // Only set when actually provided — a resize-drag PATCH sends just these two fields
+  // with no `layout`, and shouldn't touch it or panelCount.
+  if (gridColumns !== undefined) page.gridColumns = gridColumns;
+  if (gridRows !== undefined) page.gridRows = gridRows;
   if (panelCount != null && panelCount !== page.panels.length) {
     if (panelCount < page.panels.length) {
       for (const removed of page.panels.slice(panelCount)) deletePanelImage(projectId, pageId, removed.id);

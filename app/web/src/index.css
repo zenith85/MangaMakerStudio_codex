@@ -500,6 +500,36 @@ button {
   border-radius: 4px;
 }
 
+/* One of these sits over each seam between adjacent panels (see GridResizeHandles) — a
+   thin invisible hit strip, highlighted only on hover/drag so the page stays clean by
+   default but the resize affordance is discoverable by mousing over a panel edge. */
+.grid-resize-handle {
+  position: absolute;
+  z-index: 4;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+
+.grid-resize-handle-col {
+  width: 14px;
+  margin-left: -7px;
+  cursor: col-resize;
+}
+
+.grid-resize-handle-row {
+  height: 14px;
+  margin-top: -7px;
+  cursor: row-resize;
+}
+
+.grid-resize-handle:hover {
+  background: rgba(74, 92, 255, 0.35);
+}
+
+.grid-resize-handle:active {
+  background: rgba(74, 92, 255, 0.5);
+}
+
 .panel-slot {
   position: relative;
   padding: 0;

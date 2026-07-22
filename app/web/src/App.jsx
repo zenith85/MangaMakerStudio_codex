@@ -19,6 +19,7 @@ import Bubble, {
   normalizeSignedDegrees,
 } from "./Bubble";
 import ShapePicker from "./ShapePicker";
+import GridResizeHandles from "./GridResize";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
 // in order, so a layout's look comes entirely from its grid-template — no
@@ -652,6 +653,18 @@ export default function App() {
     commitBubbles(panelId, [...(panel.bubbles || []), newBubble()]);
   };
 
+  // Live grid track resize (dragging a seam between panels, see GridResizeHandles) — local
+  // only, so the canvas visibly reflows while dragging, not just once it's released.
+  const updateGridLive = (patch) => {
+    setCurrentPage((page) => ({ ...page, ...patch }));
+  };
+
+  // Persist the dragged column/row track sizes once at the end of a drag.
+  const commitGrid = (patch) => {
+    updateGridLive(patch);
+    api.updatePage(currentProjectId, currentPage.id, patch);
+  };
+
   const createPage = async ({ title, layout, stylePreset }) => {
     const panelCount = LAYOUTS.find((l) => l.value === layout)?.panelCount ?? 4;
     const page = await api.createPage(currentProjectId, { title, layout, stylePreset, panelCount });
@@ -922,6 +935,8 @@ export default function App() {
             onDragImageEnd={commitPanelImage}
             onBubblesLive={updateBubblesLive}
             onBubblesCommit={commitBubbles}
+            onGridLive={updateGridLive}
+            onGridCommit={commitGrid}
           />
         ) : (
           <p className="empty-hint">Create a page to get started.</p>
@@ -1580,19 +1595,23 @@ function PageCanvas({
   onDragImageEnd,
   onBubblesLive,
   onBubblesCommit,
+  onGridLive,
+  onGridCommit,
 }) {
   const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
   const isFreeform = !!template.panels;
+  // A page can override its layout template's default track sizes by dragging the seams
+  // between panels (see GridResizeHandles) — cleared server-side whenever the layout
+  // itself changes, since a different template's grid-area structure makes an old
+  // override meaningless.
+  const columns = page.gridColumns || template.columns;
+  const rows = page.gridRows || template.rows;
 
   return (
     <div
       ref={containerRef}
       className="page-canvas"
-      style={
-        isFreeform
-          ? undefined
-          : { gridTemplateAreas: template.areas, gridTemplateColumns: template.columns, gridTemplateRows: template.rows }
-      }
+      style={isFreeform ? undefined : { gridTemplateAreas: template.areas, gridTemplateColumns: columns, gridTemplateRows: rows }}
     >
       {page.panels.map((panel, i) => {
         const slot = isFreeform ? template.panels[i] : null;
@@ -1614,6 +1633,16 @@ function PageCanvas({
           />
         );
       })}
+      {!isFreeform && (
+        <GridResizeHandles
+          containerRef={containerRef}
+          columns={columns}
+          rows={rows}
+          areas={template.areas}
+          onLiveChange={onGridLive}
+          onCommit={onGridCommit}
+        />
+      )}
     </div>
   );
 }
