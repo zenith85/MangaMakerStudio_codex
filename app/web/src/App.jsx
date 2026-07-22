@@ -16,6 +16,7 @@ import Bubble, {
   isDashed,
   isSharpCornered,
   hasNoBackground,
+  normalizeSignedDegrees,
 } from "./Bubble";
 import ShapePicker from "./ShapePicker";
 
@@ -2040,8 +2041,8 @@ function PanelEditor({
   const setBubbleBold = (bubbleId, bold) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, bold } : b)));
   };
-  const setBubbleTextRotate = (bubbleId, textRotate) => {
-    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, textRotate } : b)));
+  const setBubbleRotate = (bubbleId, rotate) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, rotate } : b)));
   };
   const removeBubble = (bubbleId) => {
     onCommitBubbles(panel.id, bubbles.filter((b) => b.id !== bubbleId));
@@ -2382,13 +2383,13 @@ function PanelEditor({
                   />
                 </label>
                 <label className="bubble-list-font-size">
-                  Text rotation
+                  Rotation
                   <input
                     type="number"
                     min="-180"
                     max="180"
-                    value={b.textRotate || 0}
-                    onChange={(e) => setBubbleTextRotate(b.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
+                    value={normalizeSignedDegrees(b.rotate || 0)}
+                    onChange={(e) => setBubbleRotate(b.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
                   />
                 </label>
                 <label className="bubble-list-bold">

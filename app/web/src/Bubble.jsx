@@ -376,9 +376,12 @@ function rotateAroundPoint(p, center, deg) {
   return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos };
 }
 
-// Wraps a degree value into (-180, 180] — used for the text-rotate handle, so dragging
+// Wraps a degree value into (-180, 180] — used for the rotate handle, so dragging
 // past the seam (e.g. from 179° to -179°) reads as a small step rather than a 358° jump.
-function normalizeSignedDegrees(deg) {
+// Exported so the sidebar's numeric input can show old bubbles saved with an unsigned
+// 0-270 value (from the bubble's previous 90°-step-only button) in the same -180..180
+// range the input now uses, instead of jumping to a big number the first time it's opened.
+export function normalizeSignedDegrees(deg) {
   return ((((deg + 180) % 360) + 360) % 360) - 180;
 }
 
@@ -478,16 +481,13 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     );
   };
 
-  const rotateBubble = () => {
-    onChange({ rotate: (rotate + 90) % 360 }, { commit: true });
-  };
-
-  // Lets textRotate be set by dragging, not just typing a number (see the sidebar's "Text
-  // rotation" field) — same trick as dragTail: read the pointer in absolute panel-percent
-  // space, then undo the bubble's own shape rotation so what's stored is the text's angle
-  // alone, not a mix of the two. 0° is "straight up" (see displayTextRotateHandle below),
-  // matching how a rotation handle conventionally starts, so +90 puts that back to 0deg.
-  const dragTextRotate = (e) => {
+  // Lets the bubble's rotation be set by dragging a handle that orbits it, at any angle —
+  // not just typing a number or stepping by 90°. The handle sits outside the rotated
+  // .bubble div (see displayRotateHandle below), so unlike dragTail this reads the
+  // pointer's angle around center directly: there's no separate rotation layer to undo,
+  // since this IS the whole rotation now. +90 makes 0° read as "straight up", matching
+  // where the handle starts and how displayRotateHandle positions it.
+  const dragRotate = (e) => {
     const rect = containerRect();
     let lastPatch = {};
     startPointerDrag(
@@ -495,10 +495,9 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
       (ev) => {
         const px = ((ev.clientX - rect.left) / rect.width) * 100;
         const py = ((ev.clientY - rect.top) / rect.height) * 100;
-        const local = rotateAroundPoint({ x: px, y: py }, center, -rotate);
-        const angleDeg = (Math.atan2(local.y - center.y, local.x - center.x) * 180) / Math.PI;
-        const textRotate = Math.round(normalizeSignedDegrees(angleDeg + 90));
-        lastPatch = { textRotate };
+        const angleDeg = (Math.atan2(py - center.y, px - center.x) * 180) / Math.PI;
+        const newRotate = Math.round(normalizeSignedDegrees(angleDeg + 90));
+        lastPatch = { rotate: newRotate };
         onChange(lastPatch, { commit: false });
       },
       () => onChange(lastPatch, { commit: true })
@@ -541,18 +540,17 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
   // hand (the inverse of what dragTail un-rotates when storing a new tail point).
   const displayTail = bubble.tail ? rotateAroundPoint(bubble.tail, center, rotate) : null;
 
-  // The text-rotate handle has no stored position of its own (unlike the tail) — it just
-  // orbits the bubble at a fixed radius, at the angle textRotate represents. 0° sits
-  // straight up (angle -90° in atan2's convention, where 0=right and 90=down), matching
-  // where dragTextRotate reads it back from; then the bubble's own shape rotation is
-  // applied on top, same as the tail handle, so it visually stays put relative to the box.
-  const textRotateHandleRadius = Math.max(bubble.width, bubble.height) / 2 + 6;
-  const textRotateAngleRad = (((bubble.textRotate || 0) - 90) * Math.PI) / 180;
-  const localTextRotateHandle = {
-    x: center.x + textRotateHandleRadius * Math.cos(textRotateAngleRad),
-    y: center.y + textRotateHandleRadius * Math.sin(textRotateAngleRad),
+  // The rotate handle has no stored position of its own (unlike the tail) — it just orbits
+  // the bubble at a fixed radius, at the angle `rotate` itself represents. 0° sits straight
+  // up (angle -90° in atan2's convention, where 0=right and 90=down), matching where
+  // dragRotate reads it back from. Unlike displayTail, there's no separate layer to
+  // compose with — this angle *is* the bubble's rotation — so no rotateAroundPoint needed.
+  const rotateHandleRadius = Math.max(bubble.width, bubble.height) / 2 + 6;
+  const rotateAngleRad = ((rotate - 90) * Math.PI) / 180;
+  const displayRotateHandle = {
+    x: center.x + rotateHandleRadius * Math.cos(rotateAngleRad),
+    y: center.y + rotateHandleRadius * Math.sin(rotateAngleRad),
   };
-  const displayTextRotateHandle = rotateAroundPoint(localTextRotateHandle, center, rotate);
 
   return (
     <>
@@ -586,7 +584,6 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
                 WebkitTextStroke: boldStroke,
-                transform: bubble.textRotate ? `rotate(${bubble.textRotate}deg)` : undefined,
               }}
               defaultValue={bubble.text}
               autoFocus
@@ -604,7 +601,6 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
                 WebkitTextStroke: boldStroke,
-                transform: bubble.textRotate ? `rotate(${bubble.textRotate}deg)` : undefined,
               }}
             >
               {isAscendShape(bubble.shape)
@@ -620,14 +616,6 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
               ×
             </button>
             <div className="bubble-resize-handle" onPointerDown={resize} />
-            <button
-              className="bubble-rotate-btn"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={rotateBubble}
-              title="Rotate 90°"
-            >
-              ⟳
-            </button>
           </>
         )}
       </div>
@@ -642,10 +630,10 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
 
       {editable && !editingText && (
         <div
-          className="bubble-text-rotate-handle"
-          style={{ left: `${displayTextRotateHandle.x}%`, top: `${displayTextRotateHandle.y}%` }}
-          onPointerDown={dragTextRotate}
-          title="Drag to rotate text"
+          className="bubble-rotate-handle"
+          style={{ left: `${displayRotateHandle.x}%`, top: `${displayRotateHandle.y}%` }}
+          onPointerDown={dragRotate}
+          title="Drag to rotate"
         >
           ↻
         </div>
