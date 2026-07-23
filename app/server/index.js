@@ -54,6 +54,37 @@ async function normalizeUploadedImage(buffer) {
     throw new Error("Uploaded file isn't a valid image");
   }
 }
+
+function isValidMarkerRect(rect) {
+  return (
+    rect &&
+    typeof rect === "object" &&
+    ["x", "y", "width", "height"].every((k) => Number.isFinite(rect[k])) &&
+    rect.width > 0.5 &&
+    rect.height > 0.5
+  );
+}
+
+// Bakes a red rectangle onto a COPY of the panel image, in image-pixel coordinates
+// derived from rect's 0-100 percentages (as drawn by the user over the displayed image on
+// the frontend, which shows the same unrotated/unscaled source file). This copy is sent
+// to Codex as an extra reference image purely to point at the edit region — see
+// buildEditPrompt's hasMarker note, which tells Codex not to reproduce the rectangle.
+async function drawMarkerRect(imageBuffer, rect) {
+  const { width: imgW, height: imgH } = await sharp(imageBuffer).metadata();
+  const strokeWidth = Math.max(4, Math.round(Math.min(imgW, imgH) * 0.008));
+  const x = (rect.x / 100) * imgW;
+  const y = (rect.y / 100) * imgH;
+  const w = (rect.width / 100) * imgW;
+  const h = (rect.height / 100) * imgH;
+  const svg =
+    `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">` +
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="red" stroke-width="${strokeWidth}" /></svg>`;
+  return sharp(imageBuffer)
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+}
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -565,12 +596,14 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;
-    const { instructions, sceneDoc } = req.body;
+    const { instructions, sceneDoc, markerRect } = req.body;
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
     const currentImage = loadPanelImage(projectId, pageId, panel.id);
     if (!currentImage) return res.status(400).json({ error: "panel has no image to edit" });
+
+    const markedImage = isValidMarkerRect(markerRect) ? await drawMarkerRect(currentImage, markerRect) : null;
 
     // sceneDoc (a Tiptap doc, like a panel's own scene description) carries any
     // #/!/@-mentioned characters/places/objects/references/panels; plain `instructions`
@@ -602,10 +635,12 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
         panelId: p.id,
       }));
 
-    // Panel being edited goes FIRST — buildEditPrompt tells Codex that's the edit
-    // target and everything after it is just for matching appearance.
+    // Panel being edited goes FIRST (clean, untouched) — buildEditPrompt tells Codex
+    // that's the edit target. The marked-up copy, if any, goes SECOND, purely to point
+    // at the edit region. Everything after that is just for matching appearance.
     const referenceImages = [
       currentImage,
+      ...(markedImage ? [markedImage] : []),
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
       ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
@@ -621,6 +656,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       references,
       continuityPanels,
       stylePreset: page.stylePreset,
+      hasMarker: !!markedImage,
     });
     const imageBuf = await generateImageViaCodex(projectId, null, prompt, referenceImages);
 

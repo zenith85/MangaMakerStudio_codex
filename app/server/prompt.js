@@ -90,19 +90,30 @@ export function buildPrompt({
 }
 
 // Builds the prompt for editing an already-generated panel image, rather than composing
-// a new scene from scratch — the panel's CURRENT image is always passed as the FIRST
-// reference image (see generateImageViaCodex's referenceImages param), with any
-// #/!/@-mentioned characters/places/objects/references/panels following after it, so the
-// prompt has to spell out which reference image is actually the edit target.
-export function buildEditPrompt({ instructions, characters = [], places = [], objects = [], references = [], continuityPanels = [], stylePreset }) {
+// a new scene from scratch — the panel's CURRENT (clean) image is always passed as the
+// FIRST reference image (see generateImageViaCodex's referenceImages param). When the
+// user has drawn a marker rectangle, a copy of that same image with the rectangle baked
+// on goes SECOND, purely to point at the edit region — any #/!/@-mentioned
+// characters/places/objects/references/panels follow after that, so the prompt has to
+// spell out which reference image(s) are the edit target vs. just a locator vs. just for
+// matching appearance.
+export function buildEditPrompt({ instructions, characters = [], places = [], objects = [], references = [], continuityPanels = [], stylePreset, hasMarker = false }) {
   const entityParts = describeReferencedEntities({ characters, places, objects, references, continuityPanels });
   const parts = [
     "Edit the FIRST attached reference image — that is the panel being edited; do not generate an unrelated new scene from scratch.",
-    `Requested change: ${instructions?.trim() || "Improve the image."}`,
-    "Keep everything else in that first image the same (composition, characters, setting, style) except for what the requested change describes.",
   ];
+  if (hasMarker) {
+    parts.push(
+      "The SECOND attached reference image is the exact same panel with a red rectangle drawn on it, marking where the requested change should happen — it is only a locator, not part of the artwork. Do not draw, keep, or reference any red rectangle/box/outline in your output; the edited image must look like a normal panel with no markup on it."
+    );
+  }
+  parts.push(`Requested change: ${instructions?.trim() || "Improve the image."}`);
+  parts.push(
+    "Keep everything else in that first image the same (composition, characters, setting, style) except for what the requested change describes."
+  );
   if (entityParts.length) {
-    parts.push("Any OTHER attached reference images (after the first) are only for matching these, not additional edit targets:");
+    const afterNth = hasMarker ? "first two" : "first";
+    parts.push(`Any OTHER attached reference images (after the ${afterNth}) are only for matching these, not additional edit targets:`);
     parts.push(...entityParts);
   }
   parts.push(STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw);

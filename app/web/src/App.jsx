@@ -19,6 +19,14 @@ import Bubble, {
   normalizeSignedDegrees,
 } from "./Bubble";
 import ShapePicker from "./ShapePicker";
+import ExpressionMark, {
+  EXPRESSION_TYPES,
+  newExpression,
+  DEFAULT_THICKNESS,
+  MIN_THICKNESS,
+  MAX_THICKNESS,
+} from "./ExpressionMark";
+import ExpressionPicker from "./ExpressionPicker";
 import GridResizeHandles from "./GridResize";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
@@ -653,6 +661,25 @@ export default function App() {
     commitBubbles(panelId, [...(panel.bubbles || []), newBubble()]);
   };
 
+  // Live expression-mark edits (drag/resize/rotate in progress) — local only, no
+  // network call. Mirrors updateBubblesLive/commitBubbles/addBubble above.
+  const updateExpressionsLive = (panelId, expressions) => {
+    setCurrentPage((page) => ({
+      ...page,
+      panels: page.panels.map((p) => (p.id === panelId ? { ...p, expressions } : p)),
+    }));
+  };
+
+  const commitExpressions = (panelId, expressions) => {
+    updateExpressionsLive(panelId, expressions);
+    api.updatePanel(currentProjectId, currentPage.id, panelId, { expressions });
+  };
+
+  const addExpression = (panelId) => {
+    const panel = currentPage.panels.find((p) => p.id === panelId);
+    commitExpressions(panelId, [...(panel.expressions || []), newExpression()]);
+  };
+
   // Live grid track resize (dragging a seam between panels, see GridResizeHandles) — local
   // only, so the canvas visibly reflows while dragging, not just once it's released.
   const updateGridLive = (patch) => {
@@ -935,6 +962,8 @@ export default function App() {
             onDragImageEnd={commitPanelImage}
             onBubblesLive={updateBubblesLive}
             onBubblesCommit={commitBubbles}
+            onExpressionsLive={updateExpressionsLive}
+            onExpressionsCommit={commitExpressions}
             onGridLive={updateGridLive}
             onGridCommit={commitGrid}
           />
@@ -961,6 +990,8 @@ export default function App() {
           onLiveUpdate={updatePanelLive}
           onAddBubble={addBubble}
           onCommitBubbles={commitBubbles}
+          onAddExpression={addExpression}
+          onCommitExpressions={commitExpressions}
         />
       )}
 
@@ -1595,6 +1626,8 @@ function PageCanvas({
   onDragImageEnd,
   onBubblesLive,
   onBubblesCommit,
+  onExpressionsLive,
+  onExpressionsCommit,
   onGridLive,
   onGridCommit,
 }) {
@@ -1630,6 +1663,8 @@ function PageCanvas({
             onDragImageEnd={onDragImageEnd}
             onBubblesLive={onBubblesLive}
             onBubblesCommit={onBubblesCommit}
+            onExpressionsLive={onExpressionsLive}
+            onExpressionsCommit={onExpressionsCommit}
           />
         );
       })}
@@ -1684,6 +1719,8 @@ function PanelThumb({
   onDragImageEnd,
   onBubblesLive,
   onBubblesCommit,
+  onExpressionsLive,
+  onExpressionsCommit,
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
@@ -1765,6 +1802,15 @@ function PanelThumb({
 
   const deleteBubble = (bubbleId) => {
     onBubblesCommit(panel.id, bubbles.filter((b) => b.id !== bubbleId));
+  };
+
+  const expressions = panel.expressions || [];
+  const updateExpression = (markId, patch, { commit }) => {
+    const next = expressions.map((m) => (m.id === markId ? { ...m, ...patch } : m));
+    (commit ? onExpressionsCommit : onExpressionsLive)(panel.id, next);
+  };
+  const deleteExpression = (markId) => {
+    onExpressionsCommit(panel.id, expressions.filter((m) => m.id !== markId));
   };
 
   const onPointerDown = (e) => {
@@ -1868,6 +1914,17 @@ function PanelThumb({
           onDelete={() => deleteBubble(bubble.id)}
         />
       ))}
+
+      {expressions.map((mark) => (
+        <ExpressionMark
+          key={mark.id}
+          mark={mark}
+          containerRef={containerRef}
+          editable={selected}
+          onChange={(patch, opts) => updateExpression(mark.id, patch, opts)}
+          onDelete={() => deleteExpression(mark.id)}
+        />
+      ))}
     </div>
   );
 }
@@ -1888,6 +1945,8 @@ function PanelEditor({
   onLiveUpdate,
   onAddBubble,
   onCommitBubbles,
+  onAddExpression,
+  onCommitExpressions,
 }) {
   const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
@@ -1900,6 +1959,13 @@ function PanelEditor({
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
+  // Marks the region that needs the change, as 0-100 percentages of the panel's own
+  // image — drawn by the user over the preview below, sent alongside the edit request,
+  // but never part of the edited result (see backend's drawMarkerRect/buildEditPrompt).
+  const [editMarker, setEditMarker] = useState(null); // { x, y, width, height } | null
+  const [editMarkerAspect, setEditMarkerAspect] = useState(null);
+  const editMarkerBoxRef = useRef(null);
+  const editMarkerDragRef = useRef(null);
   const [showCopyFromPanel, setShowCopyFromPanel] = useState(false);
   // Live value while dragging the zoom slider or typing in either number box — null
   // means "not editing, show the committed panel value instead" (see the inputs below).
@@ -2016,7 +2082,7 @@ function PanelEditor({
     setEditBusy(true);
     setEditError("");
     try {
-      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc);
+      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarker);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
     } catch (err) {
@@ -2030,6 +2096,7 @@ function PanelEditor({
     if (editCandidate) URL.revokeObjectURL(editCandidate.url);
     setEditCandidate(null);
     setEditDoc(EMPTY_DOC);
+    setEditMarker(null);
   };
 
   // Commits the edited candidate the same way a manual file upload would — it's just
@@ -2038,6 +2105,51 @@ function PanelEditor({
     if (!editCandidate) return;
     await uploadImage(editCandidate.blob);
     discardEdit();
+  };
+
+  // Percentages relative to the marker box's own rendered bounding rect, which is sized
+  // via editMarkerAspect to exactly match the image's natural aspect ratio (see onLoad
+  // below) — so these percentages line up 1:1 with the image-pixel math the backend does
+  // in drawMarkerRect, regardless of how big the box is drawn on screen.
+  const editMarkerPercentFromEvent = (e) => {
+    const rect = editMarkerBoxRef.current.getBoundingClientRect();
+    return {
+      x: clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100),
+      y: clamp(((e.clientY - rect.top) / rect.height) * 100, 0, 100),
+    };
+  };
+
+  const onEditMarkerPointerDown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const start = editMarkerPercentFromEvent(e);
+    editMarkerDragRef.current = { start };
+    setEditMarker({ x: start.x, y: start.y, width: 0, height: 0 });
+    window.addEventListener("pointermove", onEditMarkerPointerMove);
+    window.addEventListener("pointerup", onEditMarkerPointerUp);
+  };
+
+  const onEditMarkerPointerMove = (e) => {
+    const d = editMarkerDragRef.current;
+    if (!d) return;
+    const cur = editMarkerPercentFromEvent(e);
+    d.last = {
+      x: Math.min(d.start.x, cur.x),
+      y: Math.min(d.start.y, cur.y),
+      width: Math.abs(cur.x - d.start.x),
+      height: Math.abs(cur.y - d.start.y),
+    };
+    setEditMarker(d.last);
+  };
+
+  const onEditMarkerPointerUp = () => {
+    window.removeEventListener("pointermove", onEditMarkerPointerMove);
+    window.removeEventListener("pointerup", onEditMarkerPointerUp);
+    const d = editMarkerDragRef.current;
+    editMarkerDragRef.current = null;
+    // A stray click (no real drag) leaves a near-zero-size box — drop it rather than
+    // sending a meaningless sliver of a marker.
+    if (!d?.last || d.last.width < 1 || d.last.height < 1) setEditMarker(null);
   };
 
   const clearImage = async () => {
@@ -2077,6 +2189,20 @@ function PanelEditor({
     onCommitBubbles(panel.id, bubbles.filter((b) => b.id !== bubbleId));
   };
 
+  const expressions = panel.expressions || [];
+  const setExpressionType = (markId, type) => {
+    onCommitExpressions(panel.id, expressions.map((m) => (m.id === markId ? { ...m, type } : m)));
+  };
+  const setExpressionRotate = (markId, rotate) => {
+    onCommitExpressions(panel.id, expressions.map((m) => (m.id === markId ? { ...m, rotate } : m)));
+  };
+  const setExpressionThickness = (markId, thickness) => {
+    onCommitExpressions(panel.id, expressions.map((m) => (m.id === markId ? { ...m, thickness } : m)));
+  };
+  const removeExpression = (markId) => {
+    onCommitExpressions(panel.id, expressions.filter((m) => m.id !== markId));
+  };
+
   return (
     <div className="panel-editor">
       <div className="panel-editor-header">
@@ -2097,7 +2223,10 @@ function PanelEditor({
           Scene
         </button>
         <button className={tab === "bubbles" ? "active" : ""} onClick={() => setTab("bubbles")}>
-          Speech bubbles
+          Speech
+        </button>
+        <button className={tab === "expressions" ? "active" : ""} onClick={() => setTab("expressions")}>
+          Facials
         </button>
         <button
           className="panel-move-btn"
@@ -2321,6 +2450,46 @@ function PanelEditor({
       {tab === "scene" && panel.hasImage && (
         <section className="panel-editor-lower">
           <h4>Edit generated image</h4>
+          <p className="scene-editor-hint">
+            Optionally drag a box on the image below to point at the exact spot that needs
+            the change — it's just a pointer for Codex, the box itself never shows up in
+            the edited result.
+          </p>
+          <div
+            ref={editMarkerBoxRef}
+            className="edit-marker-box"
+            style={editMarkerAspect ? { aspectRatio: editMarkerAspect } : undefined}
+            onPointerDown={onEditMarkerPointerDown}
+          >
+            <img
+              src={panel.imageUrl}
+              alt=""
+              draggable={false}
+              onLoad={(e) => setEditMarkerAspect(e.target.naturalWidth / e.target.naturalHeight)}
+            />
+            {editMarker && (
+              <div
+                className="edit-marker-rect"
+                style={{
+                  left: `${editMarker.x}%`,
+                  top: `${editMarker.y}%`,
+                  width: `${editMarker.width}%`,
+                  height: `${editMarker.height}%`,
+                }}
+              />
+            )}
+            {editMarker && (
+              <button
+                type="button"
+                className="edit-marker-clear"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setEditMarker(null)}
+                title="Clear marker"
+              >
+                ×
+              </button>
+            )}
+          </div>
           <SceneEditor
             content={editDoc}
             onChange={setEditDoc}
@@ -2428,6 +2597,70 @@ function PanelEditor({
               </div>
             ))}
             {bubbles.length === 0 && <p className="empty-hint">No speech bubbles yet.</p>}
+          </div>
+        </section>
+      )}
+
+      {tab === "expressions" && (
+        <section className="panel-editor-lower">
+          <p className="scene-editor-hint">
+            On the panel itself: drag a mark onto a face to move it, its corner to
+            resize, and the ↻ handle to rotate it. Pick each mark's type and line
+            thickness below.
+          </p>
+          <button className="primary" onClick={() => onAddExpression(panel.id)}>
+            + Add expression mark
+          </button>
+
+          {expressions.length > 0 && <h4 className="bubble-list-heading">Your expression marks</h4>}
+          <div className="bubble-list">
+            {expressions.map((m, i) => (
+              <div className="bubble-list-row" key={m.id}>
+                <div className="bubble-list-row-header">
+                  <span className="bubble-list-label">
+                    {EXPRESSION_TYPES.find((t) => t.value === m.type)?.label ?? `Mark ${i + 1}`}
+                  </span>
+                  <button className="delete" onClick={() => removeExpression(m.id)}>
+                    ×
+                  </button>
+                </div>
+                <ExpressionPicker mark={m} onSetType={(type) => setExpressionType(m.id, type)} />
+                <label className="bubble-list-font-size">
+                  Rotation
+                  <input
+                    type="number"
+                    min="-180"
+                    max="180"
+                    value={normalizeSignedDegrees(m.rotate || 0)}
+                    onChange={(e) => setExpressionRotate(m.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
+                  />
+                </label>
+                <label className="bubble-list-thickness">
+                  Thickness
+                  <div className="bubble-list-thickness-controls">
+                    <input
+                      type="range"
+                      min={MIN_THICKNESS}
+                      max={MAX_THICKNESS}
+                      step="0.1"
+                      value={m.thickness ?? DEFAULT_THICKNESS}
+                      onChange={(e) => setExpressionThickness(m.id, parseFloat(e.target.value) || DEFAULT_THICKNESS)}
+                    />
+                    <input
+                      type="number"
+                      min={MIN_THICKNESS}
+                      max={MAX_THICKNESS}
+                      step="0.1"
+                      value={m.thickness ?? DEFAULT_THICKNESS}
+                      onChange={(e) =>
+                        setExpressionThickness(m.id, clamp(parseFloat(e.target.value) || DEFAULT_THICKNESS, MIN_THICKNESS, MAX_THICKNESS))
+                      }
+                    />
+                  </div>
+                </label>
+              </div>
+            ))}
+            {expressions.length === 0 && <p className="empty-hint">No expression marks yet.</p>}
           </div>
         </section>
       )}

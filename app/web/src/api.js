@@ -61,10 +61,10 @@ export const api = {
   // Returns a Blob (raw image bytes), not JSON like everything above — the edit
   // candidate is a preview, not committed yet, so it doesn't go through `req`'s
   // res.json() parsing.
-  requestPanelEdit: async (projectId, pageId, panelId, sceneDoc) => {
+  requestPanelEdit: async (projectId, pageId, panelId, sceneDoc, markerRect) => {
     const res = await fetch(`${BASE}/projects/${projectId}/pages/${pageId}/panels/${panelId}/edit`, {
       method: "POST",
-      ...json({ sceneDoc }),
+      ...json({ sceneDoc, markerRect }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
