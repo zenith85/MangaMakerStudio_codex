@@ -511,7 +511,43 @@ function precropBubbleOutlines(container, page) {
   };
 }
 
+// Dark is this app's original look and the default for anyone who hasn't chosen yet;
+// the choice is global (not per-project), so it's read/written directly to
+// localStorage rather than living in project data. Applied via a data-theme attribute
+// on the root element, which index.css's `:root[data-theme="light"]` block hooks into.
+function useTheme() {
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  return [theme, toggleTheme];
+}
+
+// A day/night pill switch, placed beside the app title (both on the project-landing
+// screen and the in-project sidebar) — the one control for a preference that otherwise
+// has no visible home of its own.
+function ThemeToggle({ theme, onToggle }) {
+  const isLight = theme === "light";
+  return (
+    <button
+      type="button"
+      className={`theme-toggle${isLight ? " light" : ""}`}
+      role="switch"
+      aria-checked={isLight}
+      title={isLight ? "Switch to dark mode" : "Switch to light mode"}
+      onClick={onToggle}
+    >
+      <span className="theme-toggle-track">
+        <span className="theme-toggle-knob">{isLight ? "☀️" : "🌙"}</span>
+      </span>
+    </button>
+  );
+}
+
 export default function App() {
+  const [theme, toggleTheme] = useTheme();
   const [projects, setProjects] = useState(null); // null = not loaded yet
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [kind, setKind] = useState("characters");
@@ -872,7 +908,14 @@ export default function App() {
   if (!currentProjectId) {
     return (
       <>
-        <ProjectLanding projects={projects} onOpen={openProject} onCreate={createProject} onDelete={deleteProjectById} />
+        <ProjectLanding
+          projects={projects}
+          onOpen={openProject}
+          onCreate={createProject}
+          onDelete={deleteProjectById}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
         <TerminalOverlay
           show={showTerminal}
           projectId={currentProjectId}
@@ -890,7 +933,10 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <span className="app-name">Ibraheem Manga Studio</span>
+          <div className="sidebar-header-top">
+            <span className="app-name">Ibraheem Manga Studio</span>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
           <button className="back-link" onClick={() => setCurrentProjectId(null)}>
             ← Projects
           </button>
@@ -1162,7 +1208,7 @@ function DownloadPrompt({ onRetry }) {
   );
 }
 
-function ProjectLanding({ projects, onOpen, onCreate, onDelete }) {
+function ProjectLanding({ projects, onOpen, onCreate, onDelete, theme, onToggleTheme }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1184,7 +1230,10 @@ function ProjectLanding({ projects, onOpen, onCreate, onDelete }) {
 
   return (
     <div className="landing">
-      <h1>Ibraheem Manga Studio</h1>
+      <div className="landing-header">
+        <h1>Ibraheem Manga Studio</h1>
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </div>
       <div className="project-grid">
         {projects.map((p) => (
           <div className="project-card-wrap" key={p.id}>
