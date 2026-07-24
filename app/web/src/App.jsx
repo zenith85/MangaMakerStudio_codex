@@ -2071,7 +2071,7 @@ function PanelThumb({
       style={clipPath ? { ...slotStyle, clipPath } : slotStyle}
       onPointerDown={onPointerDown}
     >
-      {floating && (
+      {floating && selected && (
         <button
           type="button"
           className="floating-panel-drag-handle"
@@ -2122,7 +2122,9 @@ function PanelThumb({
         )}
       </div>
 
-      {floating && <div className="floating-panel-resize-handle" onPointerDown={onFloatResizeStart} title="Drag to resize" />}
+      {floating && selected && (
+        <div className="floating-panel-resize-handle" onPointerDown={onFloatResizeStart} title="Drag to resize" />
+      )}
 
       {bubbles.map((bubble) => (
         <Bubble
