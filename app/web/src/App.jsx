@@ -546,6 +546,21 @@ function ThemeToggle({ theme, onToggle }) {
   );
 }
 
+// A panel lives in one of two arrays on a page: `panels` (the grid layout) or
+// `floatingPanels` (freely dragged/resized above it — see the "+ Floating panel"
+// button). Bubbles/expressions/image-drag callbacks are shared between both kinds of
+// panel (they're passed the same way into PanelThumb either way), so their handlers
+// below need to find/patch a panel without knowing which array it's actually in.
+function findPanelInPage(page, panelId) {
+  return page.panels.find((p) => p.id === panelId) || (page.floatingPanels || []).find((p) => p.id === panelId);
+}
+function patchPanelInPage(page, panelId, updater) {
+  if (page.panels.some((p) => p.id === panelId)) {
+    return { ...page, panels: page.panels.map((p) => (p.id === panelId ? updater(p) : p)) };
+  }
+  return { ...page, floatingPanels: (page.floatingPanels || []).map((p) => (p.id === panelId ? updater(p) : p)) };
+}
+
 export default function App() {
   const [theme, toggleTheme] = useTheme();
   const [projects, setProjects] = useState(null); // null = not loaded yet
@@ -655,10 +670,7 @@ export default function App() {
 
   // Live drag feedback (no network call) — see PanelThumb's pointermove handler.
   const dragPanelImage = (panelId, imageOffset) => {
-    setCurrentPage((page) => ({
-      ...page,
-      panels: page.panels.map((p) => (p.id === panelId ? { ...p, imageOffset } : p)),
-    }));
+    setCurrentPage((page) => patchPanelInPage(page, panelId, (p) => ({ ...p, imageOffset })));
   };
 
   // Persist the final position once the drag ends.
@@ -671,18 +683,12 @@ export default function App() {
   // released. Mirrors dragPanelImage above; that one's offset-specific, this one isn't
   // since the sidebar has more than one field that wants this (zoom now, maybe more later).
   const updatePanelLive = (panelId, patch) => {
-    setCurrentPage((page) => ({
-      ...page,
-      panels: page.panels.map((p) => (p.id === panelId ? { ...p, ...patch } : p)),
-    }));
+    setCurrentPage((page) => patchPanelInPage(page, panelId, (p) => ({ ...p, ...patch })));
   };
 
   // Live bubble edits (drag/resize/tail-aim in progress) — local only, no network call.
   const updateBubblesLive = (panelId, bubbles) => {
-    setCurrentPage((page) => ({
-      ...page,
-      panels: page.panels.map((p) => (p.id === panelId ? { ...p, bubbles } : p)),
-    }));
+    setCurrentPage((page) => patchPanelInPage(page, panelId, (p) => ({ ...p, bubbles })));
   };
 
   // Persist bubbles — called once at the end of a drag, or immediately for discrete
@@ -693,17 +699,14 @@ export default function App() {
   };
 
   const addBubble = (panelId) => {
-    const panel = currentPage.panels.find((p) => p.id === panelId);
+    const panel = findPanelInPage(currentPage, panelId);
     commitBubbles(panelId, [...(panel.bubbles || []), newBubble()]);
   };
 
   // Live expression-mark edits (drag/resize/rotate in progress) — local only, no
   // network call. Mirrors updateBubblesLive/commitBubbles/addBubble above.
   const updateExpressionsLive = (panelId, expressions) => {
-    setCurrentPage((page) => ({
-      ...page,
-      panels: page.panels.map((p) => (p.id === panelId ? { ...p, expressions } : p)),
-    }));
+    setCurrentPage((page) => patchPanelInPage(page, panelId, (p) => ({ ...p, expressions })));
   };
 
   const commitExpressions = (panelId, expressions) => {
@@ -712,8 +715,31 @@ export default function App() {
   };
 
   const addExpression = (panelId) => {
-    const panel = currentPage.panels.find((p) => p.id === panelId);
+    const panel = findPanelInPage(currentPage, panelId);
     commitExpressions(panelId, [...(panel.expressions || []), newExpression()]);
+  };
+
+  // Live floating-panel move/resize (dragging in progress) — local only, no network
+  // call. Persisted the same way as everything else on a panel: the generic PATCH
+  // endpoint, which finds the panel in whichever of the two arrays actually has it.
+  const updateFloatingLive = (panelId, patch) => {
+    setCurrentPage((page) => patchPanelInPage(page, panelId, (p) => ({ ...p, ...patch })));
+  };
+
+  const commitFloatingPatch = (panelId, patch) => {
+    updateFloatingLive(panelId, patch);
+    api.updatePanel(currentProjectId, currentPage.id, panelId, patch);
+  };
+
+  // Adds a floating panel and immediately opens it in the sidebar — same idea as
+  // clicking a freshly-created grid panel, so the user lands straight on "generate an
+  // image or add bubbles" instead of having to go find the tiny new box on the page.
+  const addFloatingPanel = async () => {
+    const updated = await api.createFloatingPanel(currentProjectId, currentPage.id);
+    setCurrentPage(updated);
+    setPages((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    const created = updated.floatingPanels[updated.floatingPanels.length - 1];
+    setSelectedPanelId(created.id);
   };
 
   // Live grid track resize (dragging a seam between panels, see GridResizeHandles) — local
@@ -872,7 +898,7 @@ export default function App() {
     const updated = await api.updatePage(currentProjectId, currentPage.id, { layout: layoutValue, panelCount });
     setCurrentPage(updated);
     await refreshPages(currentProjectId);
-    if (selectedPanelId && !updated.panels.some((p) => p.id === selectedPanelId)) setSelectedPanelId(null);
+    if (selectedPanelId && !findPanelInPage(updated, selectedPanelId)) setSelectedPanelId(null);
   };
 
   const deletePanel = async (panelId) => {
@@ -891,7 +917,7 @@ export default function App() {
     setPages((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   };
 
-  const selectedPanel = currentPage?.panels.find((p) => p.id === selectedPanelId) || null;
+  const selectedPanel = (currentPage && findPanelInPage(currentPage, selectedPanelId)) || null;
 
   // Every panel across every page in the project, for the scene editor's #mention list
   // (continuity references aren't limited to the current page). `currentPage` stands in
@@ -991,6 +1017,7 @@ export default function App() {
           onCreate={createPage}
           onChangeLayout={changeLayout}
           onDelete={deletePage}
+          onAddFloatingPanel={addFloatingPanel}
           onExportPdf={exportPagePdf}
           onExportAllPdf={exportAllPagesPdf}
           pdfBusy={pdfBusy}
@@ -1010,6 +1037,8 @@ export default function App() {
             onBubblesCommit={commitBubbles}
             onExpressionsLive={updateExpressionsLive}
             onExpressionsCommit={commitExpressions}
+            onFloatingLive={updateFloatingLive}
+            onFloatingCommit={commitFloatingPatch}
             onGridLive={updateGridLive}
             onGridCommit={commitGrid}
           />
@@ -1522,6 +1551,7 @@ function PageBar({
   onCreate,
   onChangeLayout,
   onDelete,
+  onAddFloatingPanel,
   onExportPdf,
   onExportAllPdf,
   pdfBusy,
@@ -1570,6 +1600,11 @@ function PageBar({
         ))}
       </select>
       <button onClick={() => setShowForm((v) => !v)}>+ New page</button>
+      {currentPage && (
+        <button title="Add a floating panel — drag/resize it anywhere on top of the page" onClick={onAddFloatingPanel}>
+          + Floating panel
+        </button>
+      )}
       {currentPage && (
         <div className="layout-picker-wrap" ref={layoutPickerRef}>
           <button onClick={() => setShowLayoutPicker((v) => !v)}>Change layout</button>
@@ -1677,6 +1712,8 @@ function PageCanvas({
   onBubblesCommit,
   onExpressionsLive,
   onExpressionsCommit,
+  onFloatingLive,
+  onFloatingCommit,
   onGridLive,
   onGridCommit,
 }) {
@@ -1727,6 +1764,29 @@ function PageCanvas({
           onCommit={onGridCommit}
         />
       )}
+
+      {/* Rendered AFTER the grid panels above (not interleaved with them) — floats over
+          the whole layout rather than occupying a grid-area/freeform slot of its own,
+          positioned by its own x/y/width/height instead of an array-index-driven slot. */}
+      {(page.floatingPanels || []).map((panel) => (
+        <PanelThumb
+          key={panel.id}
+          panel={panel}
+          selected={panel.id === selectedPanelId}
+          slotStyle={{ position: "absolute", left: `${panel.x}%`, top: `${panel.y}%`, width: `${panel.width}%`, height: `${panel.height}%` }}
+          floating
+          pageContainerRef={containerRef}
+          onFloatingLive={onFloatingLive}
+          onFloatingCommit={onFloatingCommit}
+          onSelect={onSelect}
+          onDragImage={onDragImage}
+          onDragImageEnd={onDragImageEnd}
+          onBubblesLive={onBubblesLive}
+          onBubblesCommit={onBubblesCommit}
+          onExpressionsLive={onExpressionsLive}
+          onExpressionsCommit={onExpressionsCommit}
+        />
+      ))}
     </div>
   );
 }
@@ -1770,6 +1830,10 @@ function PanelThumb({
   onBubblesCommit,
   onExpressionsLive,
   onExpressionsCommit,
+  floating,
+  pageContainerRef,
+  onFloatingLive,
+  onFloatingCommit,
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
@@ -1862,6 +1926,64 @@ function PanelThumb({
     onExpressionsCommit(panel.id, expressions.filter((m) => m.id !== markId));
   };
 
+  // Moving/resizing the floating panel itself — separate from onPointerDown below,
+  // which pans/crops the IMAGE inside a panel. Both live on the same box, so each has
+  // its own dedicated handle (a titlebar strip, a corner handle) and stops the pointer
+  // event from bubbling to the other's listener. Math is percent-of-the-whole-page-
+  // canvas (pageContainerRef), not percent-of-this-panel's-own-box (containerRef) —
+  // unlike Bubble/ExpressionMark, this box IS the thing being measured, so it can't be
+  // its own reference frame.
+  const onFloatDragStart = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect(panel.id);
+    const rect = pageContainerRef.current.getBoundingClientRect();
+    const startX = panel.x;
+    const startY = panel.y;
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    let lastPatch = {};
+    const onMove = (ev) => {
+      const dxPct = ((ev.clientX - startClientX) / rect.width) * 100;
+      const dyPct = ((ev.clientY - startClientY) / rect.height) * 100;
+      lastPatch = { x: clamp(startX + dxPct, 0, 100 - panel.width), y: clamp(startY + dyPct, 0, 100 - panel.height) };
+      onFloatingLive(panel.id, lastPatch);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      onFloatingCommit(panel.id, lastPatch);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const onFloatResizeStart = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = pageContainerRef.current.getBoundingClientRect();
+    const startW = panel.width;
+    const startH = panel.height;
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    let lastPatch = {};
+    const onMove = (ev) => {
+      const dwPct = ((ev.clientX - startClientX) / rect.width) * 100;
+      const dhPct = ((ev.clientY - startClientY) / rect.height) * 100;
+      lastPatch = { width: clamp(startW + dwPct, 10, 100 - panel.x), height: clamp(startH + dhPct, 10, 100 - panel.y) };
+      onFloatingLive(panel.id, lastPatch);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      onFloatingCommit(panel.id, lastPatch);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const onPointerDown = (e) => {
     if (!panel.hasImage || e.button !== 0) return;
     e.preventDefault();
@@ -1915,10 +2037,27 @@ function PanelThumb({
   return (
     <div
       ref={containerRef}
-      className={`panel-slot ${selected ? "selected" : ""} ${panel.hasImage ? "has-image" : ""}`}
+      className={`panel-slot ${selected ? "selected" : ""} ${panel.hasImage ? "has-image" : ""} ${floating ? "floating" : ""}`}
       style={clipPath ? { ...slotStyle, clipPath } : slotStyle}
       onPointerDown={onPointerDown}
     >
+      {floating && (
+        <button
+          type="button"
+          className="floating-panel-drag-handle"
+          onPointerDown={onFloatDragStart}
+          title="Drag to move"
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="5 9 2 12 5 15" />
+            <polyline points="9 5 12 2 15 5" />
+            <polyline points="15 19 12 22 9 19" />
+            <polyline points="19 9 22 12 19 15" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+            <line x1="12" y1="2" x2="12" y2="22" />
+          </svg>
+        </button>
+      )}
       {/* clip-path also goes on the OUTER panel-slot (not just the inner image layer
           below) for tilted/diagonal layouts — two panels there share an identical
           bounding box, and without clipping the outer element too, clicks in one
@@ -1948,10 +2087,12 @@ function PanelThumb({
           </>
         ) : (
           <span className="placeholder" style={placeholderStyle} onClick={() => onSelect(panel.id)}>
-            Click to set up panel {panel.order + 1}
+            {floating ? "Click to set up this floating panel" : `Click to set up panel ${panel.order + 1}`}
           </span>
         )}
       </div>
+
+      {floating && <div className="floating-panel-resize-handle" onPointerDown={onFloatResizeStart} title="Drag to resize" />}
 
       {bubbles.map((bubble) => (
         <Bubble
@@ -2283,7 +2424,7 @@ function PanelEditor({
     <>
     <div className="panel-editor">
       <div className="panel-editor-header">
-        <h3>Panel {panel.order + 1}</h3>
+        <h3>{panel.floating ? "Floating panel" : `Panel ${panel.order + 1}`}</h3>
         <div className="panel-editor-header-actions">
           <button className="delete-panel" onClick={() => onDelete(panel.id)}>
             Delete panel
@@ -2305,22 +2446,28 @@ function PanelEditor({
         <button className={tab === "expressions" ? "active" : ""} onClick={() => setTab("expressions")}>
           Facials
         </button>
-        <button
-          className="panel-move-btn"
-          title="Move panel earlier"
-          onClick={() => onMove(panel.id, "left")}
-          disabled={panel.order === 0}
-        >
-          ←
-        </button>
-        <button
-          className="panel-move-btn"
-          title="Move panel later"
-          onClick={() => onMove(panel.id, "right")}
-          disabled={panel.order === page.panels.length - 1}
-        >
-          →
-        </button>
+        {/* Moving means swapping grid slots (see server's reindexPanelOrder) — floating
+            panels have no fixed neighbors to swap with, they're just dragged wherever. */}
+        {!panel.floating && (
+          <>
+            <button
+              className="panel-move-btn"
+              title="Move panel earlier"
+              onClick={() => onMove(panel.id, "left")}
+              disabled={panel.order === 0}
+            >
+              ←
+            </button>
+            <button
+              className="panel-move-btn"
+              title="Move panel later"
+              onClick={() => onMove(panel.id, "right")}
+              disabled={panel.order === page.panels.length - 1}
+            >
+              →
+            </button>
+          </>
+        )}
       </div>
 
       {tab === "scene" && (

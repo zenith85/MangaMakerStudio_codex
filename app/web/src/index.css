@@ -628,6 +628,54 @@ button {
   text-align: center;
 }
 
+/* A floating panel (see PanelThumb's `floating` prop) sits on top of the grid layout
+   rather than in one of its slots — the shadow and elevated z-index are what actually
+   read as "floating above the page" rather than just another panel. */
+.panel-slot.floating {
+  z-index: 8;
+}
+
+.panel-slot.floating .panel-slot-image-layer {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* A small corner handle for repositioning the WHOLE floating panel — separate from the
+   ordinary panel-slot drag, which pans/crops the image inside it instead. Sits just
+   outside the box (like .bubble-delete's own corner badge) rather than a bar across
+   the top, so it doesn't cover any of the panel's own content. */
+.floating-panel-drag-handle {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  width: 20px;
+  height: 20px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #4a5cff;
+  border: 2px solid white;
+  color: white;
+  padding: 0;
+  cursor: move;
+  touch-action: none;
+}
+
+.floating-panel-resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
+  z-index: 9;
+  border-radius: 3px;
+  background: #4a5cff;
+  border: 2px solid white;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
 .empty-hint {
   color: var(--text-faint);
   font-size: 13px;

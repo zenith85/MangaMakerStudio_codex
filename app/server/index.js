@@ -115,7 +115,13 @@ function withPanelImage(projectId, pageId, panel) {
   return { ...panel, ...panelImageInfo(projectId, pageId, panel.id) };
 }
 function withPageImages(projectId, page) {
-  return { ...page, panels: page.panels.map((p) => withPanelImage(projectId, page.id, p)) };
+  return {
+    ...page,
+    panels: page.panels.map((p) => withPanelImage(projectId, page.id, p)),
+    // Defaults to [] here (not just wherever it's read) so every page in every response
+    // always has this field, even ones saved before floating panels existed.
+    floatingPanels: (page.floatingPanels || []).map((p) => withPanelImage(projectId, page.id, p)),
+  };
 }
 
 // ---------- Projects ----------
@@ -274,11 +280,44 @@ app.get("/api/projects/:projectId/pages/:id", (req, res) => {
   res.json(withPageImages(req.params.projectId, page));
 });
 
+// A floating panel is a regular panel in every way that matters (scene/generate/edit,
+// bubbles, expressions, image transforms — see findPanel) except where it lives on the
+// page: not a slot in the layout grid, but its own freely dragged/resized box, in
+// percent of the page canvas — x/y/width/height here, not an array-index-driven
+// gridArea/freeform slot like `panels`. Deliberately no `order` field — grid-only
+// concept (see reindexPanelOrder), meaningless for something with no fixed neighbors.
+app.post("/api/projects/:projectId/pages/:pageId/floating-panels", (req, res) => {
+  const { projectId, pageId } = req.params;
+  const pages = listPages(projectId);
+  const page = pages.find((p) => p.id === pageId);
+  if (!page) return res.status(404).json({ error: "page not found" });
+
+  const panel = {
+    id: nanoid(8),
+    floating: true,
+    sceneDoc: EMPTY_SCENE_DOC,
+    x: 30,
+    y: 30,
+    width: 30,
+    height: 30,
+  };
+  page.floatingPanels = page.floatingPanels || [];
+  page.floatingPanels.push(panel);
+  savePages(projectId, pages);
+  res.json(withPageImages(projectId, page));
+});
+
+// A panel lives in one of two places on a page: `panels` (the grid layout — position
+// comes from array index, see reindexPanelOrder below) or `floatingPanels` (freely
+// dragged/resized above the page, position is its own x/y/width/height fields — see
+// the /floating-panels route). Every panel sub-route (image, generate, edit, bubbles/
+// expressions via the generic PATCH) goes through this one lookup, so a floating panel
+// gets every one of those for free without needing its own copies of those routes.
 function findPanel(projectId, pageId, panelId) {
   const pages = listPages(projectId);
   const page = pages.find((p) => p.id === pageId);
   if (!page) return {};
-  const panel = page.panels.find((pn) => pn.id === panelId);
+  const panel = page.panels.find((pn) => pn.id === panelId) || (page.floatingPanels || []).find((pn) => pn.id === panelId);
   return { pages, page, panel };
 }
 
@@ -312,8 +351,15 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) 
   if (!panel) return res.status(404).json({ error: "panel not found" });
 
   deletePanelImage(projectId, pageId, panel.id);
-  page.panels = page.panels.filter((p) => p.id !== panelId);
-  reindexPanelOrder(page.panels);
+  // Grid panels reindex order (their position in the array is what drives grid
+  // placement, see reindexPanelOrder); floating panels have no such notion — dropping
+  // one from its own array is the whole operation.
+  if (page.panels.some((p) => p.id === panelId)) {
+    page.panels = page.panels.filter((p) => p.id !== panelId);
+    reindexPanelOrder(page.panels);
+  } else {
+    page.floatingPanels = (page.floatingPanels || []).filter((p) => p.id !== panelId);
+  }
   savePages(projectId, pages);
   res.json(withPageImages(projectId, page));
 });

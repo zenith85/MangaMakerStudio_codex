@@ -35,6 +35,8 @@ export const api = {
   listPages: (projectId) => req(`/projects/${projectId}/pages`),
   createPage: (projectId, body) => req(`/projects/${projectId}/pages`, { method: "POST", ...json(body) }),
   getPage: (projectId, id) => req(`/projects/${projectId}/pages/${id}`),
+  createFloatingPanel: (projectId, pageId) =>
+    req(`/projects/${projectId}/pages/${pageId}/floating-panels`, { method: "POST", ...json({}) }),
   updatePage: (projectId, pageId, body) =>
     req(`/projects/${projectId}/pages/${pageId}`, { method: "PATCH", ...json(body) }),
   deletePage: (projectId, pageId) => req(`/projects/${projectId}/pages/${pageId}`, { method: "DELETE" }),
