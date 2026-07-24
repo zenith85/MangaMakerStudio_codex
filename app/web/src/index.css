@@ -782,32 +782,70 @@ button {
   cursor: pointer;
 }
 
-.edit-compare {
+/* Pops up over everything (see EditCompareModal in App.jsx) once a requested edit comes
+   back — wider than the default .modal so two full-size images actually fit side by side
+   instead of the small thumbnails this replaced. */
+.edit-compare-modal {
+  width: 1040px;
+  max-width: 94vw;
+}
+
+.edit-compare-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 16px;
   margin-top: 14px;
 }
 
+/* Each option IS a button — clicking the image itself is the decision, not a separate
+   "keep this one" control underneath it — so the button reset here undoes all of a
+   plain <button>'s own styling in favor of just framing the image. */
 .edit-compare-option {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: stretch;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .edit-compare-option img {
   width: 100%;
-  aspect-ratio: 1;
+  height: 56vh;
   object-fit: contain;
   background: var(--bg-canvas);
-  border-radius: 8px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.edit-compare-option:hover img,
+.edit-compare-option:focus-visible img {
+  border-color: #4a5cff;
+  box-shadow: 0 0 0 3px rgba(74, 92, 255, 0.25);
+}
+
+.edit-compare-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.edit-compare-option:disabled img {
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 .edit-compare-label {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
+  text-align: center;
 }
 
 .panel-editor-lower .primary {

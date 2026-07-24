@@ -1978,6 +1978,33 @@ function PanelThumb({
   );
 }
 
+// Pops up once a requested edit comes back — big before/after images instead of the
+// small inline thumbnails this replaced, since a tiny side-by-side pair made it hard to
+// actually judge the change. Clicking either image IS the decision (no separate "keep
+// this one" button to also click); there's no backdrop-dismiss, since "before" already
+// covers "never mind, keep what I had."
+function EditCompareModal({ beforeUrl, afterUrl, busy, onKeepOriginal, onKeepEdited }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal edit-compare-modal">
+        <h2>Choose a version</h2>
+        <p className="scene-editor-hint">Click the image you want to keep.</p>
+        <div className="edit-compare-grid">
+          <button type="button" className="edit-compare-option" onClick={onKeepOriginal} disabled={busy}>
+            <span className="edit-compare-label">Before</span>
+            <img src={beforeUrl} alt="Before edit" />
+          </button>
+          <button type="button" className="edit-compare-option" onClick={onKeepEdited} disabled={busy}>
+            <span className="edit-compare-label">After</span>
+            <img src={afterUrl} alt="After edit" />
+          </button>
+        </div>
+        {busy && <p className="empty-hint">Saving…</p>}
+      </div>
+    </div>
+  );
+}
+
 function PanelEditor({
   projectId,
   page,
@@ -2253,6 +2280,7 @@ function PanelEditor({
   };
 
   return (
+    <>
     <div className="panel-editor">
       <div className="panel-editor-header">
         <h3>Panel {panel.order + 1}</h3>
@@ -2557,25 +2585,6 @@ function PanelEditor({
           </button>
 
           {editError && <p className="error">{editError}</p>}
-
-          {editCandidate && (
-            <div className="edit-compare">
-              <div className="edit-compare-option">
-                <span className="edit-compare-label">Before</span>
-                <img src={panel.imageUrl} alt="Before edit" />
-                <button onClick={discardEdit} disabled={imageBusy}>
-                  Keep this one
-                </button>
-              </div>
-              <div className="edit-compare-option">
-                <span className="edit-compare-label">After</span>
-                <img src={editCandidate.url} alt="After edit" />
-                <button onClick={useEditedVersion} disabled={imageBusy}>
-                  Keep this one
-                </button>
-              </div>
-            </div>
-          )}
         </section>
       )}
 
@@ -2714,5 +2723,16 @@ function PanelEditor({
         </section>
       )}
     </div>
+
+    {editCandidate && (
+      <EditCompareModal
+        beforeUrl={panel.imageUrl}
+        afterUrl={editCandidate.url}
+        busy={imageBusy}
+        onKeepOriginal={discardEdit}
+        onKeepEdited={useEditedVersion}
+      />
+    )}
+    </>
   );
 }
