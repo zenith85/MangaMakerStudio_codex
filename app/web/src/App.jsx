@@ -659,6 +659,16 @@ export default function App() {
     setSelectedPanelId(null);
   };
 
+  // Big prev/next arrows beside the page canvas — quicker than reaching for the page
+  // picker dropdown when just paging through a project in order.
+  const currentPageIndex = currentPage ? pages.findIndex((p) => p.id === currentPage.id) : -1;
+  const goToPrevPage = () => {
+    if (currentPageIndex > 0) openPage(pages[currentPageIndex - 1].id);
+  };
+  const goToNextPage = () => {
+    if (currentPageIndex >= 0 && currentPageIndex < pages.length - 1) openPage(pages[currentPageIndex + 1].id);
+  };
+
   // Also patches the page into `pages` (not just `currentPage`) so mentioning this
   // page's panels for continuity from elsewhere in the project stays up to date.
   const refreshCurrentPage = async () => {
@@ -1026,22 +1036,42 @@ export default function App() {
           onOpenSavedPdf={openSavedPdf}
         />
         {currentPage ? (
-          <PageCanvas
-            containerRef={pageCanvasRef}
-            page={currentPage}
-            selectedPanelId={selectedPanelId}
-            onSelect={setSelectedPanelId}
-            onDragImage={dragPanelImage}
-            onDragImageEnd={commitPanelImage}
-            onBubblesLive={updateBubblesLive}
-            onBubblesCommit={commitBubbles}
-            onExpressionsLive={updateExpressionsLive}
-            onExpressionsCommit={commitExpressions}
-            onFloatingLive={updateFloatingLive}
-            onFloatingCommit={commitFloatingPatch}
-            onGridLive={updateGridLive}
-            onGridCommit={commitGrid}
-          />
+          <div className="page-canvas-nav">
+            <button
+              className="page-nav-arrow"
+              onClick={goToPrevPage}
+              disabled={currentPageIndex <= 0}
+              title="Previous page"
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <PageCanvas
+              containerRef={pageCanvasRef}
+              page={currentPage}
+              selectedPanelId={selectedPanelId}
+              onSelect={setSelectedPanelId}
+              onDragImage={dragPanelImage}
+              onDragImageEnd={commitPanelImage}
+              onBubblesLive={updateBubblesLive}
+              onBubblesCommit={commitBubbles}
+              onExpressionsLive={updateExpressionsLive}
+              onExpressionsCommit={commitExpressions}
+              onFloatingLive={updateFloatingLive}
+              onFloatingCommit={commitFloatingPatch}
+              onGridLive={updateGridLive}
+              onGridCommit={commitGrid}
+            />
+            <button
+              className="page-nav-arrow"
+              onClick={goToNextPage}
+              disabled={currentPageIndex < 0 || currentPageIndex >= pages.length - 1}
+              title="Next page"
+              aria-label="Next page"
+            >
+              ›
+            </button>
+          </div>
         ) : (
           <p className="empty-hint">Create a page to get started.</p>
         )}

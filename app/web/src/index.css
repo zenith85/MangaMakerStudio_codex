@@ -531,6 +531,47 @@ button {
   color: var(--text-primary);
 }
 
+/* Flanks .page-canvas with big prev/next arrows (see the "Big prev/next arrows" comment
+   in App.jsx) — a quicker way to step through a project's pages in order than reaching
+   for the page picker dropdown every time. */
+.page-canvas-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-canvas-nav .page-canvas {
+  flex: 0 1 640px;
+}
+
+.page-nav-arrow {
+  flex-shrink: 0;
+  width: 56px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  line-height: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.page-nav-arrow:hover:not(:disabled) {
+  background: #4a5cff;
+  border-color: #4a5cff;
+  color: white;
+}
+
+.page-nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .page-canvas {
   position: relative;
   display: grid;
