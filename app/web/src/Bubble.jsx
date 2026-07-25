@@ -583,6 +583,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontFamily: fontFamilyFor(bubble.font),
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
+                color: bubble.textColor || undefined,
                 WebkitTextStroke: boldStroke,
               }}
               defaultValue={bubble.text}
@@ -600,6 +601,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontFamily: fontFamilyFor(bubble.font),
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
+                color: bubble.textColor || undefined,
                 WebkitTextStroke: boldStroke,
               }}
             >

@@ -2431,6 +2431,9 @@ function PanelEditor({
   const setBubbleBold = (bubbleId, bold) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, bold } : b)));
   };
+  const setBubbleTextColor = (bubbleId, textColor) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, textColor } : b)));
+  };
   const setBubbleRotate = (bubbleId, rotate) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, rotate } : b)));
   };
@@ -2825,6 +2828,14 @@ function PanelEditor({
                     max="180"
                     value={normalizeSignedDegrees(b.rotate || 0)}
                     onChange={(e) => setBubbleRotate(b.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
+                  />
+                </label>
+                <label className="bubble-list-color">
+                  Text color
+                  <input
+                    type="color"
+                    value={b.textColor || "#111111"}
+                    onChange={(e) => setBubbleTextColor(b.id, e.target.value)}
                   />
                 </label>
                 <label className="bubble-list-bold">
