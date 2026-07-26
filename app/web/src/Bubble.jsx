@@ -424,8 +424,11 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
       (ev) => {
         const dxPct = ((ev.clientX - startClientX) / rect.width) * 100;
         const dyPct = ((ev.clientY - startClientY) / rect.height) * 100;
-        const nx = clamp(startX + dxPct, 0, 100 - bubble.width);
-        const ny = clamp(startY + dyPct, 0, 100 - bubble.height);
+        // Up to half the bubble is allowed to hang off any edge — comic bubbles/SFX
+        // routinely bleed off a panel's edge, and strictly confining the whole box left
+        // no room for that (nor any margin for error reaching the boundary exactly).
+        const nx = clamp(startX + dxPct, -bubble.width / 2, 100 - bubble.width / 2);
+        const ny = clamp(startY + dyPct, -bubble.height / 2, 100 - bubble.height / 2);
         lastPatch = { x: nx, y: ny };
         if (startTail) {
           lastPatch.tail = { x: clamp(startTail.x + (nx - startX), 0, 100), y: clamp(startTail.y + (ny - startY), 0, 100) };
@@ -448,8 +451,13 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
       (ev) => {
         const dwPct = ((ev.clientX - startClientX) / rect.width) * 100;
         const dhPct = ((ev.clientY - startClientY) / rect.height) * 100;
-        const nw = clamp(startW + dwPct, 8, 100 - bubble.x);
-        const nh = clamp(startH + dhPct, 8, 100 - bubble.y);
+        // Not capped by position (100 - bubble.x/y) any more — that tied how big a bubble
+        // could grow to where it happened to be sitting, stopping it well short of full
+        // size for anything not already near the top-left corner. Now it can grow up to
+        // the full size of the panel from wherever it starts; moveBody above is what lets
+        // the resulting box hang off an edge if that makes it too big to fit in place.
+        const nw = clamp(startW + dwPct, 8, 100);
+        const nh = clamp(startH + dhPct, 8, 100);
         lastPatch = { width: nw, height: nh };
         onChange(lastPatch, { commit: false });
       },
