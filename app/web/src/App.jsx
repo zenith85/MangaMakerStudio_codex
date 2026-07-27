@@ -240,6 +240,24 @@ function polygonCentroid(clipPath) {
   return { x: cx / (6 * area), y: cy / (6 * area) };
 }
 
+// Converts the same polygon(x% y%, ...) string into an SVG <polygon points="..."> value
+// in actual pixel space (frameW/frameH) instead of percent — see PanelThumb's diagonal-
+// panel rendering, which draws each panel as a genuinely-shaped SVG polygon (a real
+// trapezoid, different width top vs bottom) rather than a rectangle with clip-path
+// hiding part of it. A real shape is a native SVG feature — much more reliably captured
+// when exporting to PDF than a CSS clip-path trick layered on a plain rectangle.
+function svgPolygonPoints(clipPath, frameW, frameH) {
+  const match = clipPath.match(/polygon\(([^)]+)\)/);
+  if (!match) return "";
+  return match[1]
+    .split(",")
+    .map((pair) => {
+      const [xPct, yPct] = pair.trim().split(/\s+/).map((v) => parseFloat(v));
+      return `${(xPct / 100) * frameW},${(yPct / 100) * frameH}`;
+    })
+    .join(" ");
+}
+
 const DIAGONAL_LAYOUTS = [
   // A tilted band across the top (split into 2 panels by a diagonal seam), then 2
   // squares below. panelCount must match panels.length exactly — PageCanvas and
@@ -1894,6 +1912,37 @@ function PanelThumb({
     if (img && img.complete && img.naturalWidth) setNatural({ w: img.naturalWidth, h: img.naturalHeight });
   }, [panel.imageUrl]);
 
+  // Diagonal/tilted panels (clipPath truthy) render as a real SVG polygon shape instead
+  // of a plain <img> — see the return below — so there's no rendered <img> element here
+  // for `natural` to come from the usual way. Measured off a detached Image() instead,
+  // and immediately re-encoded as a data: URI: an SVG <image> referencing this app's own
+  // backend (a different port = a different origin) can silently fail to actually paint
+  // when the page gets rasterized for a PDF export, even with proper CORS — inlining the
+  // pixels directly sidesteps that rather than depending on it not happening.
+  const [svgImageHref, setSvgImageHref] = useState(null);
+  useEffect(() => {
+    if (!clipPath || !panel.imageUrl) {
+      setSvgImageHref(null);
+      return;
+    }
+    let cancelled = false;
+    const im = new Image();
+    im.crossOrigin = "anonymous";
+    im.onload = () => {
+      if (cancelled) return;
+      setNatural({ w: im.naturalWidth, h: im.naturalHeight });
+      const c = document.createElement("canvas");
+      c.width = im.naturalWidth;
+      c.height = im.naturalHeight;
+      c.getContext("2d").drawImage(im, 0, 0);
+      setSvgImageHref(c.toDataURL("image/png"));
+    };
+    im.src = panel.imageUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [clipPath, panel.imageUrl]);
+
   const offset = panel.imageOffset || { x: 50, y: 50 };
   const rotate = panel.imageRotate || 0;
   const zoom = panel.imageScale || 1;
@@ -2088,14 +2137,47 @@ function PanelThumb({
           </svg>
         </button>
       )}
-      {/* clip-path also goes on the OUTER panel-slot (not just the inner image layer
-          below) for tilted/diagonal layouts — two panels there share an identical
+      {/* The OUTER panel-slot (not this inner image layer) still gets its own
+          clip-path for tilted/diagonal layouts — two panels there share an identical
           bounding box, and without clipping the outer element too, clicks in one
           panel's visible area can hit-test against its neighbor's unclipped box
-          instead, since that's what actually captures the pointer event. */}
-      <div className="panel-slot-image-layer" style={clipPath ? { clipPath } : undefined}>
+          instead, since that's what actually captures the pointer event. This layer's
+          own clip-path is gone: for a diagonal panel the shape now comes from a real
+          SVG polygon below instead, not a rectangle with part of it hidden. */}
+      {/* This layer's own background/border are a plain rectangle CSS paints
+          unconditionally — for a diagonal panel that would opaquely cover whichever
+          sibling panel shares this exact box, exactly the bug this rework fixes.
+          Cleared so only the SVG polygon shape below is ever actually visible. */}
+      <div className="panel-slot-image-layer" style={clipPath ? { background: "transparent", border: "none" } : undefined}>
         {panel.hasImage ? (
-          <>
+          clipPath ? (
+            svgImageHref && (
+              <svg
+                width="100%"
+                height="100%"
+                viewBox={`0 0 ${frameW} ${frameH}`}
+                preserveAspectRatio="none"
+                style={{ position: "absolute", inset: 0, overflow: "hidden" }}
+              >
+                <defs>
+                  <clipPath id={`panel-shape-${panel.id}`}>
+                    <polygon points={svgPolygonPoints(clipPath, frameW, frameH)} />
+                  </clipPath>
+                </defs>
+                <image
+                  href={svgImageHref}
+                  xlinkHref={svgImageHref}
+                  x={imgLeft}
+                  y={imgTop}
+                  width={renderedW}
+                  height={renderedH}
+                  clipPath={`url(#panel-shape-${panel.id})`}
+                  transform={`translate(${rotateOriginX} ${rotateOriginY}) rotate(${rotate}) scale(${rotateScale}) translate(${-rotateOriginX} ${-rotateOriginY})`}
+                  style={{ filter: `brightness(${panel.imageBrightness ?? 100}%)` }}
+                />
+              </svg>
+            )
+          ) : (
             <img
               ref={imgRef}
               src={panel.imageUrl}
@@ -2114,7 +2196,7 @@ function PanelThumb({
                 filter: `brightness(${panel.imageBrightness ?? 100}%)`,
               }}
             />
-          </>
+          )
         ) : (
           <span className="placeholder" style={placeholderStyle} onClick={() => onSelect(panel.id)}>
             {floating ? "Click to set up this floating panel" : `Click to set up panel ${panel.order + 1}`}
