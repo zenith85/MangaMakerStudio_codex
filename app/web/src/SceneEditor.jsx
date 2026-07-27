@@ -32,11 +32,14 @@ function mentionSuggestion(char, itemsRef) {
   return {
     char,
     items: ({ query }) => {
-      // The list scrolls (.mention-list has max-height + overflow-y: auto), so an
-      // 8-item cap just silently hid everything past it with no query typed — e.g. any
-      // project with more than ~8 panels total would never show its later pages here.
+      // No cap here — the list already scrolls (.mention-list has max-height +
+      // overflow-y: auto). A fixed cap (this used to be 8, then 50) just silently hides
+      // whatever's past it when browsing with no query typed, and any project that
+      // eventually grows past that number runs into the exact same bug again — e.g. a
+      // project with enough pages/panels to exceed it could never mention its later
+      // pages here at all, only ones early enough to land inside the cap.
       const q = query.toLowerCase();
-      return itemsRef.current.filter((e) => e.label.toLowerCase().includes(q)).slice(0, 50);
+      return itemsRef.current.filter((e) => e.label.toLowerCase().includes(q));
     },
     render: () => {
       let component;
