@@ -32,6 +32,10 @@ export const api = {
   generateEntity: (projectId, kind, id) =>
     req(`/projects/${projectId}/${kind}/${id}/generate`, { method: "POST", ...json({}) }),
 
+  listFonts: (projectId) => req(`/projects/${projectId}/fonts`),
+  createFont: (projectId, formData) => req(`/projects/${projectId}/fonts`, { method: "POST", body: formData }),
+  deleteFont: (projectId, fontId) => req(`/projects/${projectId}/fonts/${fontId}`, { method: "DELETE" }),
+
   listPages: (projectId) => req(`/projects/${projectId}/pages`),
   createPage: (projectId, body) => req(`/projects/${projectId}/pages`, { method: "POST", ...json(body) }),
   getPage: (projectId, id) => req(`/projects/${projectId}/pages/${id}`),

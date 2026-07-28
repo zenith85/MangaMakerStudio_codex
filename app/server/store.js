@@ -171,6 +171,55 @@ export function entityImageUrl(projectId, kind, entityId) {
   return `${LOCAL_ORIGIN}/projects/${projectId}/${kind}/${entityId}/image.png`;
 }
 
+// ---------- Custom fonts: ProjectName/fonts/<id>/ ----------
+// A user-uploaded font file, project-scoped (available to every bubble in that project,
+// not just the one it was uploaded from). Same per-item-folder convention as
+// characters/places/objects/references, just without the fields/style/generated-image
+// parts those need — meta.json (name, ext, createdAt) plus the file itself.
+
+function fontDir(projectId, fontId) {
+  return path.join(projectDir(projectId), "fonts", fontId);
+}
+
+export function fontUrl(projectId, fontId, ext) {
+  return `${LOCAL_ORIGIN}/projects/${projectId}/fonts/${fontId}/font.${ext}`;
+}
+
+function readFont(projectId, fontId) {
+  const dir = fontDir(projectId, fontId);
+  const meta = readJSON(path.join(dir, "meta.json"));
+  if (!meta) return null;
+  return { ...meta, id: fontId, url: fontUrl(projectId, fontId, meta.ext) };
+}
+
+export function listFonts(projectId) {
+  const fontsDir = path.join(projectDir(projectId), "fonts");
+  if (!fs.existsSync(fontsDir)) return [];
+  return fs
+    .readdirSync(fontsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => readFont(projectId, d.name))
+    .filter(Boolean)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function createFont(projectId, { name, ext, buffer }) {
+  const fontsDir = path.join(projectDir(projectId), "fonts");
+  fs.mkdirSync(fontsDir, { recursive: true });
+  const id = uniqueSlug(fontsDir, name);
+  const dir = path.join(fontsDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const meta = { name: name.trim(), ext, createdAt: Date.now() };
+  writeJSON(path.join(dir, "meta.json"), meta);
+  fs.writeFileSync(path.join(dir, `font.${ext}`), buffer);
+  return { ...meta, id, url: fontUrl(projectId, id, ext) };
+}
+
+export function deleteFont(projectId, fontId) {
+  fs.rmSync(fontDir(projectId, fontId), { recursive: true, force: true });
+}
+
 // ---------- Pages: ProjectName/pages.json ----------
 
 // Panels used to store characterIds/placeId/objectIds arrays plus a separate plain

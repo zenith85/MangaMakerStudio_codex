@@ -100,7 +100,28 @@ export const FONTS = [
   { value: "reggaeone", label: "Reggae One", family: "'Reggae One', cursive" },
 ];
 
-export function fontFamilyFor(fontValue) {
+// User-uploaded fonts (see the "+ Upload font" control in the bubble list, App.jsx) are
+// stored as `custom:<fontId>` in bubble.font, keeping them unambiguous from the fixed
+// FONTS values above regardless of what a user names their upload. The CSS font-family
+// name actually registered for one (see the dynamic @font-face App.jsx injects) is
+// always this exact string — never the user-provided display name directly, since that
+// can contain characters/duplicates that don't round-trip safely as a CSS identifier.
+const CUSTOM_FONT_PREFIX = "custom:";
+export function customFontValue(fontId) {
+  return `${CUSTOM_FONT_PREFIX}${fontId}`;
+}
+export function customFontIdFromValue(fontValue) {
+  return fontValue?.startsWith(CUSTOM_FONT_PREFIX) ? fontValue.slice(CUSTOM_FONT_PREFIX.length) : null;
+}
+export function customFontFamilyName(fontId) {
+  return `custom-font-${fontId}`;
+}
+
+export function fontFamilyFor(fontValue, customFonts = []) {
+  const customId = customFontIdFromValue(fontValue);
+  if (customId && customFonts.some((f) => f.id === customId)) {
+    return `"${customFontFamilyName(customId)}", sans-serif`;
+  }
   return FONTS.find((f) => f.value === fontValue)?.family ?? FONTS[0].family;
 }
 
@@ -402,7 +423,7 @@ function startPointerDrag(e, onMove, onEnd) {
 // image. Read-only when `editable` is false (viewing the page); when true — the panel
 // is the one currently open in the editor — it can be dragged, resized, have its tail
 // aimed by dragging the tail tip, and have its text edited in place via double-click.
-export default function Bubble({ bubble, containerRef, editable, onChange, onDelete }) {
+export default function Bubble({ bubble, containerRef, editable, onChange, onDelete, customFonts = [] }) {
   const [editingText, setEditingText] = useState(false);
 
   const containerRect = () => containerRef.current.getBoundingClientRect();
@@ -588,7 +609,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             <textarea
               className="bubble-text-input"
               style={{
-                fontFamily: fontFamilyFor(bubble.font),
+                fontFamily: fontFamilyFor(bubble.font, customFonts),
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
                 color: bubble.textColor || undefined,
@@ -606,7 +627,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             <div
               className={`bubble-text${noiseTextClass(bubble.shape) ? ` ${noiseTextClass(bubble.shape)}` : ""}`}
               style={{
-                fontFamily: fontFamilyFor(bubble.font),
+                fontFamily: fontFamilyFor(bubble.font, customFonts),
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
                 color: bubble.textColor || undefined,

@@ -30,6 +30,9 @@ import {
   deletePanelImage,
   panelImageInfo,
   panelImagePath,
+  listFonts,
+  createFont,
+  deleteFont,
 } from "./store.js";
 import { generateImageViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
@@ -217,6 +220,33 @@ for (const kind of ENTITY_KINDS) {
     res.json({ ok: true });
   });
 }
+
+// ---------- Custom fonts (uploaded by the user, alongside the fixed preset list) ----------
+// Project-scoped, not panel/bubble-scoped — upload once, every bubble in this project can
+// use it. Served via the same static /projects mount everything else under a project's
+// folder already uses (see app.use("/projects", ...) above), so no dedicated file route
+// is needed here beyond create/list/delete.
+
+const FONT_EXTENSIONS = new Set(["ttf", "otf", "woff", "woff2"]);
+
+app.get("/api/projects/:projectId/fonts", (req, res) => {
+  res.json(listFonts(req.params.projectId));
+});
+
+app.post("/api/projects/:projectId/fonts", upload.single("font"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "font file is required" });
+  const ext = path.extname(req.file.originalname).slice(1).toLowerCase();
+  if (!FONT_EXTENSIONS.has(ext)) {
+    return res.status(400).json({ error: "font must be a .ttf, .otf, .woff, or .woff2 file" });
+  }
+  const name = req.body.name?.trim() || path.basename(req.file.originalname, path.extname(req.file.originalname));
+  res.json(createFont(req.params.projectId, { name, ext, buffer: req.file.buffer }));
+});
+
+app.delete("/api/projects/:projectId/fonts/:fontId", (req, res) => {
+  deleteFont(req.params.projectId, req.params.fontId);
+  res.json({ ok: true });
+});
 
 for (const kind of GENERATABLE_KINDS) {
   // Generate (or redraw) this entity's single reference image via Codex.

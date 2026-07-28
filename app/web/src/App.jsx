@@ -17,6 +17,9 @@ import Bubble, {
   isSharpCornered,
   hasNoBackground,
   normalizeSignedDegrees,
+  customFontValue,
+  customFontFamilyName,
+  fontFamilyFor,
 } from "./Bubble";
 import ShapePicker from "./ShapePicker";
 import ExpressionMark, {
@@ -585,6 +588,7 @@ export default function App() {
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [kind, setKind] = useState("characters");
   const [entities, setEntities] = useState({ characters: [], places: [], objects: [], references: [] });
+  const [customFonts, setCustomFonts] = useState([]); // project-scoped — uploaded once, usable by every bubble in it
   const [editingEntity, setEditingEntity] = useState(null); // { kind, entity } | { kind, entity: null } for "new"
   const [pages, setPages] = useState([]);
   const [currentPage, setCurrentPage] = useState(null);
@@ -632,6 +636,21 @@ export default function App() {
 
   const refreshPages = useCallback((projectId) => api.listPages(projectId).then(setPages), []);
 
+  const refreshCustomFonts = useCallback((projectId) => api.listFonts(projectId).then(setCustomFonts), []);
+
+  // Registers each uploaded font's @font-face so `customFontFamilyName(font.id)` (see
+  // Bubble.jsx's fontFamilyFor) actually resolves to something — done here, once per
+  // project, rather than per-bubble, since the same uploaded font can be reused by any
+  // bubble anywhere in the project.
+  useEffect(() => {
+    const styleEl = document.createElement("style");
+    document.head.appendChild(styleEl);
+    styleEl.textContent = customFonts
+      .map((f) => `@font-face { font-family: "${customFontFamilyName(f.id)}"; src: url("${f.url}"); }`)
+      .join("\n");
+    return () => styleEl.remove();
+  }, [customFonts]);
+
   useEffect(() => {
     refreshProjects();
   }, [refreshProjects]);
@@ -643,6 +662,18 @@ export default function App() {
     setShowTerminal(true); // auto-open, cwd'd into this project's folder
     refreshEntities(id);
     refreshPages(id);
+    refreshCustomFonts(id);
+  };
+
+  // Uploads a font file from the user's computer, makes it available project-wide (not
+  // just to the bubble that triggered the upload), and returns its new `custom:<id>`
+  // bubble.font value so the caller can apply it immediately.
+  const uploadCustomFont = async (file) => {
+    const formData = new FormData();
+    formData.append("font", file);
+    const font = await api.createFont(currentProjectId, formData);
+    setCustomFonts((prev) => [...prev, font]);
+    return customFontValue(font.id);
   };
 
   const createProject = async (name) => {
@@ -1071,6 +1102,7 @@ export default function App() {
               onSelect={setSelectedPanelId}
               onDragImage={dragPanelImage}
               onDragImageEnd={commitPanelImage}
+              customFonts={customFonts}
               onBubblesLive={updateBubblesLive}
               onBubblesCommit={commitBubbles}
               onExpressionsLive={updateExpressionsLive}
@@ -1115,6 +1147,8 @@ export default function App() {
           onCommitBubbles={commitBubbles}
           onAddExpression={addExpression}
           onCommitExpressions={commitExpressions}
+          customFonts={customFonts}
+          onUploadFont={uploadCustomFont}
         />
       )}
 
@@ -1608,20 +1642,27 @@ function PageBar({
   onOpenSavedPdf,
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [showLayoutPicker, setShowLayoutPicker] = useState(false);
   const [title, setTitle] = useState("");
   const [layout, setLayout] = useState("grid-2x2");
   const [stylePreset, setStylePreset] = useState("manga_bw");
-  const layoutPickerRef = useRef(null);
+  const menuRef = useRef(null);
 
+  // One shared popover anchor (the ⋮ button) for both the action list and the layout
+  // grid — closes both on an outside click, same trigger point either way instead of
+  // jumping to wherever "Change layout" used to live in the old always-visible row.
   useEffect(() => {
-    if (!showLayoutPicker) return;
+    if (!showMenu && !showLayoutPicker) return;
     const onDocPointerDown = (e) => {
-      if (layoutPickerRef.current && !layoutPickerRef.current.contains(e.target)) setShowLayoutPicker(false);
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setShowMenu(false);
+        setShowLayoutPicker(false);
+      }
     };
     document.addEventListener("pointerdown", onDocPointerDown);
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
-  }, [showLayoutPicker]);
+  }, [showMenu, showLayoutPicker]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -1647,37 +1688,106 @@ function PageBar({
           </option>
         ))}
       </select>
-      <button onClick={() => setShowForm((v) => !v)}>+ New page</button>
-      {currentPage && (
-        <button title="Add a floating panel — drag/resize it anywhere on top of the page" onClick={onAddFloatingPanel}>
-          + Floating panel
+
+      <div className="page-menu-wrap" ref={menuRef}>
+        <button
+          type="button"
+          className="page-menu-trigger"
+          onClick={() => {
+            setShowLayoutPicker(false);
+            setShowMenu((v) => !v);
+          }}
+          title="Page actions"
+          aria-label="Page actions"
+        >
+          ⋮
         </button>
-      )}
-      {currentPage && (
-        <div className="layout-picker-wrap" ref={layoutPickerRef}>
-          <button onClick={() => setShowLayoutPicker((v) => !v)}>Change layout</button>
-          {showLayoutPicker && (
-            <div className="layout-picker-popover">
-              <LayoutPicker value={currentPage.layout} onChange={pickLayout} />
-            </div>
-          )}
-        </div>
-      )}
-      {currentPage && (
-        <button className="delete-page" onClick={() => onDelete(currentPage.id)}>
-          Delete page
-        </button>
-      )}
-      {currentPage && (
-        <button onClick={onExportPdf} disabled={pdfBusy}>
-          {pdfBusy ? "Saving PDF…" : "Save as PDF"}
-        </button>
-      )}
-      {pages.length > 1 && (
-        <button onClick={onExportAllPdf} disabled={pdfBusy}>
-          {pdfBusy ? "Saving PDF…" : "Export all pages as PDF"}
-        </button>
-      )}
+
+        {showMenu && (
+          <div className="page-menu-popover">
+            <button
+              type="button"
+              className="page-menu-item"
+              onClick={() => {
+                setShowForm((v) => !v);
+                setShowMenu(false);
+              }}
+            >
+              + New page
+            </button>
+            {currentPage && (
+              <button
+                type="button"
+                className="page-menu-item"
+                title="Add a floating panel — drag/resize it anywhere on top of the page"
+                onClick={() => {
+                  onAddFloatingPanel();
+                  setShowMenu(false);
+                }}
+              >
+                + Floating panel
+              </button>
+            )}
+            {currentPage && (
+              <button
+                type="button"
+                className="page-menu-item"
+                onClick={() => {
+                  setShowMenu(false);
+                  setShowLayoutPicker(true);
+                }}
+              >
+                Change layout
+              </button>
+            )}
+            {currentPage && (
+              <button
+                type="button"
+                className="page-menu-item"
+                disabled={pdfBusy}
+                onClick={() => {
+                  setShowMenu(false);
+                  onExportPdf();
+                }}
+              >
+                {pdfBusy ? "Saving PDF…" : "Save as PDF"}
+              </button>
+            )}
+            {pages.length > 1 && (
+              <button
+                type="button"
+                className="page-menu-item"
+                disabled={pdfBusy}
+                onClick={() => {
+                  setShowMenu(false);
+                  onExportAllPdf();
+                }}
+              >
+                {pdfBusy ? "Saving PDF…" : "Export all pages as PDF"}
+              </button>
+            )}
+            {currentPage && (
+              <button
+                type="button"
+                className="page-menu-item page-menu-item-danger"
+                onClick={() => {
+                  setShowMenu(false);
+                  onDelete(currentPage.id);
+                }}
+              >
+                Delete page
+              </button>
+            )}
+          </div>
+        )}
+
+        {showLayoutPicker && currentPage && (
+          <div className="page-menu-popover page-menu-popover-wide">
+            <LayoutPicker value={currentPage.layout} onChange={pickLayout} />
+          </div>
+        )}
+      </div>
+
       {pdfStatus && (
         <span className={`pdf-status${pdfStatus.startsWith("Failed") ? " pdf-status-error" : ""}`}>{pdfStatus}</span>
       )}
@@ -1756,6 +1866,7 @@ function PageCanvas({
   onSelect,
   onDragImage,
   onDragImageEnd,
+  customFonts,
   onBubblesLive,
   onBubblesCommit,
   onExpressionsLive,
@@ -1795,6 +1906,7 @@ function PageCanvas({
             onSelect={onSelect}
             onDragImage={onDragImage}
             onDragImageEnd={onDragImageEnd}
+            customFonts={customFonts}
             onBubblesLive={onBubblesLive}
             onBubblesCommit={onBubblesCommit}
             onExpressionsLive={onExpressionsLive}
@@ -1829,6 +1941,7 @@ function PageCanvas({
           onSelect={onSelect}
           onDragImage={onDragImage}
           onDragImageEnd={onDragImageEnd}
+          customFonts={customFonts}
           onBubblesLive={onBubblesLive}
           onBubblesCommit={onBubblesCommit}
           onExpressionsLive={onExpressionsLive}
@@ -1882,6 +1995,7 @@ function PanelThumb({
   pageContainerRef,
   onFloatingLive,
   onFloatingCommit,
+  customFonts,
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
@@ -2216,6 +2330,7 @@ function PanelThumb({
           editable={selected}
           onChange={(patch, opts) => updateBubble(bubble.id, patch, opts)}
           onDelete={() => deleteBubble(bubble.id)}
+          customFonts={customFonts}
         />
       ))}
 
@@ -2278,6 +2393,8 @@ function PanelEditor({
   onCommitBubbles,
   onAddExpression,
   onCommitExpressions,
+  customFonts,
+  onUploadFont,
 }) {
   const [sceneDoc, setSceneDoc] = useState(panel.sceneDoc);
   const [busy, setBusy] = useState(false);
@@ -2882,7 +2999,7 @@ function PanelEditor({
                 />
                 <select
                   className="bubble-list-font"
-                  style={{ fontFamily: FONTS.find((f) => f.value === b.font)?.family }}
+                  style={{ fontFamily: fontFamilyFor(b.font, customFonts) }}
                   value={b.font || FONTS[0].value}
                   onChange={(e) => setBubbleFont(b.id, e.target.value)}
                 >
@@ -2891,7 +3008,34 @@ function PanelEditor({
                       {f.label}
                     </option>
                   ))}
+                  {customFonts.length > 0 && (
+                    <optgroup label="Your fonts">
+                      {customFonts.map((f) => (
+                        <option
+                          key={f.id}
+                          value={customFontValue(f.id)}
+                          style={{ fontFamily: customFontFamilyName(f.id) }}
+                        >
+                          {f.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
+                <label className="bubble-list-font-upload" title="Upload a font file (.ttf, .otf, .woff, .woff2)">
+                  + Font
+                  <input
+                    type="file"
+                    accept=".ttf,.otf,.woff,.woff2"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      const value = await onUploadFont(file);
+                      setBubbleFont(b.id, value);
+                    }}
+                  />
+                </label>
                 <label className="bubble-list-font-size">
                   Font size
                   <input
