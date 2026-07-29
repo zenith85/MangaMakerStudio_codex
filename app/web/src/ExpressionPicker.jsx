@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { EXPRESSION_TYPES, ExpressionIcon } from "./ExpressionMark";
 
-function ExpressionPreview({ type, size, thickness }) {
+function ExpressionPreview({ type, size, thickness, lineCount }) {
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" style={{ overflow: "visible", flexShrink: 0 }}>
-      <ExpressionIcon type={type} thickness={thickness} />
+      <ExpressionIcon type={type} thickness={thickness} lineCount={lineCount} />
     </svg>
   );
 }
@@ -29,7 +29,7 @@ export default function ExpressionPicker({ mark, onSetType }) {
   return (
     <div className="shape-dropdown" ref={rootRef}>
       <button type="button" className="shape-dropdown-trigger" onClick={() => setOpen((v) => !v)}>
-        <ExpressionPreview type={mark.type} size={22} thickness={mark.thickness} />
+        <ExpressionPreview type={mark.type} size={22} thickness={mark.thickness} lineCount={mark.lineCount} />
         <span>{current?.label ?? "Type"}</span>
         <span className="shape-dropdown-caret">▾</span>
       </button>

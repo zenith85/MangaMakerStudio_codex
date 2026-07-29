@@ -1661,6 +1661,14 @@ button.primary:disabled {
   margin-top: 10px;
 }
 
+.panel-screentone {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
 .panel-zoom-control {
   display: flex;
   align-items: center;

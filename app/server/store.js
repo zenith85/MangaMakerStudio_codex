@@ -309,6 +309,10 @@ export function savePanelImage(projectId, pageId, panelId, buffer) {
   const dir = panelImageDir(projectId, pageId, panelId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(panelImagePath(projectId, pageId, panelId), buffer);
+  // The old filtered derivative (see below) was baked from whatever image used to be
+  // here — stale the moment the original changes, so it can't be left around to be
+  // mistakenly re-shown once filter.png (see filterImageInfo) no longer matches it.
+  deleteFilterImage(projectId, pageId, panelId);
 }
 
 export function loadPanelImage(projectId, pageId, panelId) {
@@ -318,6 +322,38 @@ export function loadPanelImage(projectId, pageId, panelId) {
 
 export function deletePanelImage(projectId, pageId, panelId) {
   fs.rmSync(panelImageDir(projectId, pageId, panelId), { recursive: true, force: true });
+}
+
+// A filtered image (screentone/crosshatch/ink-threshold/vignette — see imageFilters.js)
+// is a single DERIVATIVE slot living alongside the original (image.png), never replacing
+// it — that's what makes the filter toggle on a panel reversible: turning it off just
+// goes back to serving the untouched original, no re-upload needed. Only one filter can
+// be baked at a time (re-applying, including with a different type, overwrites this same
+// file); regenerated when the user explicitly (re-)applies a filter (see the /filter
+// route), and invalidated automatically the moment the original image changes (see
+// savePanelImage above) since it would otherwise silently show an effect baked from a
+// picture that no longer exists.
+export function filterImagePath(projectId, pageId, panelId) {
+  return path.join(panelImageDir(projectId, pageId, panelId), "filter.png");
+}
+export function saveFilterImage(projectId, pageId, panelId, buffer) {
+  const dir = panelImageDir(projectId, pageId, panelId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(filterImagePath(projectId, pageId, panelId), buffer);
+}
+export function deleteFilterImage(projectId, pageId, panelId) {
+  const p = filterImagePath(projectId, pageId, panelId);
+  if (fs.existsSync(p)) fs.rmSync(p);
+}
+// mtime cache-busting, same reasoning as panelImageInfo above.
+export function filterImageInfo(projectId, pageId, panelId) {
+  const p = filterImagePath(projectId, pageId, panelId);
+  if (!fs.existsSync(p)) return { hasFilter: false, filterUrl: null };
+  const v = Math.round(fs.statSync(p).mtimeMs);
+  return {
+    hasFilter: true,
+    filterUrl: `${LOCAL_ORIGIN}/projects/${projectId}/pages/${pageId}/panels/${panelId}/filter.png?v=${v}`,
+  };
 }
 
 // mtime doubles as a free cache-buster — every save/regenerate overwrites the file,

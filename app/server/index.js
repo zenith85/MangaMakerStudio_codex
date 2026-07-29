@@ -30,12 +30,16 @@ import {
   deletePanelImage,
   panelImageInfo,
   panelImagePath,
+  saveFilterImage,
+  deleteFilterImage,
+  filterImageInfo,
   listFonts,
   createFont,
   deleteFont,
 } from "./store.js";
 import { generateImageViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
+import { applyImageFilter } from "./imageFilters.js";
 import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -115,7 +119,13 @@ function withEntityUrl(projectId, kind, entity) {
 // generic PATCH) and a stale cached URL baked into that JSON would defeat the whole
 // point of using file mtime as the cache-buster.
 function withPanelImage(projectId, pageId, panel) {
-  return { ...panel, ...panelImageInfo(projectId, pageId, panel.id) };
+  const info = panelImageInfo(projectId, pageId, panel.id);
+  const filterInfo = filterImageInfo(projectId, pageId, panel.id);
+  // The toggle (panel.imageFilterEnabled) just picks which already-on-disk file to point
+  // imageUrl at — the original is never touched, so switching it off always falls back
+  // to the untouched picture with no re-upload or re-generation needed.
+  const imageUrl = panel.imageFilterEnabled && filterInfo.hasFilter ? filterInfo.filterUrl : info.imageUrl;
+  return { ...panel, ...info, imageUrl, hasFilter: filterInfo.hasFilter };
 }
 function withPageImages(projectId, page) {
   return {
@@ -485,17 +495,51 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", upload.
 
   savePanelImage(projectId, pageId, panel.id, buffer);
   panel.imageOffset = { x: 50, y: 50 };
+  panel.imageFilterEnabled = false; // a filter baked from the previous image has no meaning for a brand new one
   savePages(projectId, pages);
   res.json(withPanelImage(projectId, pageId, panel));
 });
 
 app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId/image", (req, res) => {
   const { projectId, pageId, panelId } = req.params;
-  const { panel } = findPanel(projectId, pageId, panelId);
+  const { pages, panel } = findPanel(projectId, pageId, panelId);
   if (!panel) return res.status(404).json({ error: "panel not found" });
 
   deletePanelImage(projectId, pageId, panel.id);
+  panel.imageFilterEnabled = false;
+  savePages(projectId, pages);
   res.json(withPanelImage(projectId, pageId, panel));
+});
+
+// Bakes one of the manga filters (see imageFilters.js: screentone/crosshatch/inkThreshold/
+// vignette) onto the panel's CURRENT image and saves it as a single DERIVATIVE slot
+// (filter.png, see store.js) — the original image.png is never touched, so this is safe to
+// commit immediately rather than needing an accept/discard step. The panel's
+// `imageFilterEnabled` flag (toggled independently via the generic PATCH below) just picks
+// which of the two files to show; re-calling this (e.g. with a different type or a changed
+// slider) simply re-bakes the derivative from the still-untouched original, overwriting
+// whichever filter was baked there before.
+app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/filter", async (req, res) => {
+  try {
+    const { projectId, pageId, panelId } = req.params;
+    const { type, params } = req.body;
+    const { pages, panel } = findPanel(projectId, pageId, panelId);
+    if (!panel) return res.status(404).json({ error: "panel not found" });
+
+    const currentImage = loadPanelImage(projectId, pageId, panel.id);
+    if (!currentImage) return res.status(400).json({ error: "panel has no image to filter" });
+
+    const outBuf = await applyImageFilter(currentImage, type, params || {});
+    saveFilterImage(projectId, pageId, panel.id, outBuf);
+    panel.imageFilter = type;
+    panel.imageFilterParams = params || {};
+    panel.imageFilterEnabled = true;
+    savePages(projectId, pages);
+    res.json(withPanelImage(projectId, pageId, panel));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Reveals a panel's saved image file in the host's native file manager. macOS/Windows can
@@ -559,6 +603,21 @@ app.post("/api/projects/:projectId/pdf", upload.single("pdf"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "pdf is required" });
 
   const filename = `${slugifyTitle(project.name)}.pdf`;
+  fs.writeFileSync(path.join(PROJECTS_DIR, projectId, filename), req.file.buffer);
+  res.json({ ok: true, filename });
+});
+
+// Saves every page of the project stitched into one CBZ (a zip of page images built
+// client-side — see exportAllPagesCbz in App.jsx), living at the project's root next to
+// the equivalent all-pages PDF. CBZ readers just expect a plain zip of page images in
+// order, nothing more, so the server's only job is to persist the already-built bytes.
+app.post("/api/projects/:projectId/cbz", upload.single("cbz"), (req, res) => {
+  const { projectId } = req.params;
+  const project = getProject(projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  if (!req.file) return res.status(400).json({ error: "cbz is required" });
+
+  const filename = `${slugifyTitle(project.name)}.cbz`;
   fs.writeFileSync(path.join(PROJECTS_DIR, projectId, filename), req.file.buffer);
   res.json({ ok: true, filename });
 });
@@ -653,6 +712,11 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     });
 
     await generateImageViaCodex(projectId, panelImagePath(projectId, pageId, panel.id), prompt, referenceImages);
+    // Writes straight to panelImagePath rather than going through savePanelImage (which
+    // would normally invalidate this for us) — so the stale filter derivative has to be
+    // cleared explicitly here too.
+    deleteFilterImage(projectId, pageId, panel.id);
+    panel.imageFilterEnabled = false;
 
     savePages(projectId, pages);
 

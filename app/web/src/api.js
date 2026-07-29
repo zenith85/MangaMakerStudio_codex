@@ -62,6 +62,7 @@ export const api = {
   savePagePdf: (projectId, pageId, formData) =>
     req(`/projects/${projectId}/pages/${pageId}/pdf`, { method: "POST", body: formData }),
   saveProjectPdf: (projectId, formData) => req(`/projects/${projectId}/pdf`, { method: "POST", body: formData }),
+  saveProjectCbz: (projectId, formData) => req(`/projects/${projectId}/cbz`, { method: "POST", body: formData }),
   openProjectFile: (projectId, relativePath) =>
     req(`/projects/${projectId}/open-file`, { method: "POST", ...json({ relativePath }) }),
   // Returns a Blob (raw image bytes), not JSON like everything above — the edit
@@ -80,4 +81,13 @@ export const api = {
     }
     return res.blob();
   },
+  // Unlike requestPanelEdit above, this commits immediately — it only ever bakes a
+  // derivative file (filter.png) alongside the untouched original, so there's no
+  // "candidate" step needed. Returns the updated panel (imageFilterEnabled: true, new
+  // imageUrl). `type` is one of "screentone" | "crosshatch" | "inkThreshold" | "vignette".
+  applyPanelFilter: (projectId, pageId, panelId, type, params) =>
+    req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/filter`, {
+      method: "POST",
+      ...json({ type, params }),
+    }),
 };

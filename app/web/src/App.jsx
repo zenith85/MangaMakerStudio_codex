@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import JSZip from "jszip";
 import { api } from "./api";
 import Terminal from "./Terminal";
 import SceneEditor from "./SceneEditor";
@@ -28,6 +29,9 @@ import ExpressionMark, {
   DEFAULT_THICKNESS,
   MIN_THICKNESS,
   MAX_THICKNESS,
+  DEFAULT_LINE_COUNT,
+  MIN_LINE_COUNT,
+  MAX_LINE_COUNT,
 } from "./ExpressionMark";
 import ExpressionPicker from "./ExpressionPicker";
 import GridResizeHandles from "./GridResize";
@@ -321,6 +325,19 @@ LAYOUTS.push(...DIAGONAL_LAYOUTS);
 // instructions editor, which is a fresh Tiptap doc each time, not loaded from a panel.
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
+// Mirrors server/imageFilters.js's per-type params — kept in sync by hand since the
+// server and browser bundles can't share source. Each filter takes exactly one adjustable
+// slider param; `key` is the name that param is sent to the backend under.
+const FILTER_TYPES = [
+  { value: "screentone", label: "Screentone (dots)", param: { key: "cellSize", label: "Dot size", min: 1, max: 40, step: 1, default: 8, unit: "px" } },
+  { value: "crosshatch", label: "Crosshatch", param: { key: "spacing", label: "Line spacing", min: 3, max: 30, step: 1, default: 10, unit: "px" } },
+  { value: "inkThreshold", label: "Ink threshold", param: { key: "threshold", label: "Threshold", min: 0, max: 100, step: 1, default: 50, unit: "%" } },
+  { value: "vignette", label: "Vignette", param: { key: "strength", label: "Strength", min: 0, max: 100, step: 1, default: 50, unit: "%" } },
+];
+function filterParamMeta(type) {
+  return FILTER_TYPES.find((f) => f.value === type)?.param ?? FILTER_TYPES[0].param;
+}
+
 const STYLE_PRESETS = [
   { value: "manga_bw", label: "Manga (B&W, screentone detail)" },
   { value: "manga_simple", label: "Manga (B&W, simple/clean)" },
@@ -597,6 +614,9 @@ export default function App() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
   const [pdfSavedPath, setPdfSavedPath] = useState(""); // relative to the project folder; lets the "Open" button find it
+  const [cbzBusy, setCbzBusy] = useState(false);
+  const [cbzStatus, setCbzStatus] = useState("");
+  const [cbzSavedPath, setCbzSavedPath] = useState("");
   const pageCanvasRef = useRef(null);
 
   // "checking" | "online" | "offline" — whether a local agent is running on THIS
@@ -623,6 +643,14 @@ export default function App() {
       await api.openProjectFile(currentProjectId, pdfSavedPath);
     } catch (err) {
       setPdfStatus(`Failed: ${err.message}`);
+    }
+  };
+
+  const openSavedCbz = async () => {
+    try {
+      await api.openProjectFile(currentProjectId, cbzSavedPath);
+    } catch (err) {
+      setCbzStatus(`Failed: ${err.message}`);
     }
   };
 
@@ -934,6 +962,53 @@ export default function App() {
     }
   };
 
+  // Same per-page capture loop as exportAllPagesPdf, but zips the page images into a CBZ
+  // (a plain zip of page001.png, page002.png, ... — the format every comic/manga reader
+  // expects) instead of assembling a PDF.
+  const exportAllPagesCbz = async () => {
+    const hadSelection = selectedPanelId;
+    const hadPageId = currentPage?.id;
+    setSelectedPanelId(null);
+
+    setCbzBusy(true);
+    setCbzStatus("");
+    setCbzSavedPath("");
+    const freshPages = pages.map((p) => (p.id === currentPage?.id ? currentPage : p));
+    try {
+      const zip = new JSZip();
+      let pageNumber = 0;
+      for (const page of freshPages) {
+        setCurrentPage(page);
+        await new Promise((r) => setTimeout(r, 50));
+
+        const restoreImages = await precropPanelImages(pageCanvasRef.current);
+        const restoreBubbles = precropBubbleOutlines(pageCanvasRef.current, page);
+        const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
+        restoreImages();
+        restoreBubbles();
+
+        pageNumber += 1;
+        const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        zip.file(`page-${String(pageNumber).padStart(3, "0")}.png`, pngBlob);
+      }
+
+      if (pageNumber === 0) throw new Error("no pages to export");
+      const blob = await zip.generateAsync({ type: "blob" });
+      const formData = new FormData();
+      formData.append("cbz", blob, "book.cbz");
+      const result = await api.saveProjectCbz(currentProjectId, formData);
+      setCbzStatus(`Saved as ${result.filename}`);
+      setCbzSavedPath(result.filename);
+    } catch (err) {
+      setCbzStatus(`Failed: ${err.message}`);
+    } finally {
+      const restored = freshPages.find((p) => p.id === hadPageId);
+      setCurrentPage(restored || null);
+      setCbzBusy(false);
+      if (hadSelection) setSelectedPanelId(hadSelection);
+    }
+  };
+
   // Switching to a layout with fewer panels drops the trailing ones (grid position
   // comes from array order — see PageCanvas), so warn first if any would be lost.
   const changeLayout = async (layoutValue) => {
@@ -1079,10 +1154,15 @@ export default function App() {
           onAddFloatingPanel={addFloatingPanel}
           onExportPdf={exportPagePdf}
           onExportAllPdf={exportAllPagesPdf}
+          onExportAllCbz={exportAllPagesCbz}
           pdfBusy={pdfBusy}
           pdfStatus={pdfStatus}
           pdfSavedPath={pdfSavedPath}
           onOpenSavedPdf={openSavedPdf}
+          cbzBusy={cbzBusy}
+          cbzStatus={cbzStatus}
+          cbzSavedPath={cbzSavedPath}
+          onOpenSavedCbz={openSavedCbz}
         />
         {currentPage ? (
           <div className="page-canvas-nav">
@@ -1636,10 +1716,15 @@ function PageBar({
   onAddFloatingPanel,
   onExportPdf,
   onExportAllPdf,
+  onExportAllCbz,
   pdfBusy,
   pdfStatus,
   pdfSavedPath,
   onOpenSavedPdf,
+  cbzBusy,
+  cbzStatus,
+  cbzSavedPath,
+  onOpenSavedCbz,
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -1744,7 +1829,7 @@ function PageBar({
               <button
                 type="button"
                 className="page-menu-item"
-                disabled={pdfBusy}
+                disabled={pdfBusy || cbzBusy}
                 onClick={() => {
                   setShowMenu(false);
                   onExportPdf();
@@ -1757,13 +1842,26 @@ function PageBar({
               <button
                 type="button"
                 className="page-menu-item"
-                disabled={pdfBusy}
+                disabled={pdfBusy || cbzBusy}
                 onClick={() => {
                   setShowMenu(false);
                   onExportAllPdf();
                 }}
               >
                 {pdfBusy ? "Saving PDF…" : "Export all pages as PDF"}
+              </button>
+            )}
+            {pages.length > 1 && (
+              <button
+                type="button"
+                className="page-menu-item"
+                disabled={pdfBusy || cbzBusy}
+                onClick={() => {
+                  setShowMenu(false);
+                  onExportAllCbz();
+                }}
+              >
+                {cbzBusy ? "Saving CBZ…" : "Export all pages as CBZ"}
               </button>
             )}
             {currentPage && (
@@ -1793,6 +1891,14 @@ function PageBar({
       )}
       {pdfSavedPath && (
         <button className="pdf-open-button" onClick={onOpenSavedPdf}>
+          Open
+        </button>
+      )}
+      {cbzStatus && (
+        <span className={`pdf-status${cbzStatus.startsWith("Failed") ? " pdf-status-error" : ""}`}>{cbzStatus}</span>
+      )}
+      {cbzSavedPath && (
+        <button className="pdf-open-button" onClick={onOpenSavedCbz}>
           Open
         </button>
       )}
@@ -2420,6 +2526,23 @@ function PanelEditor({
   const [zoomDraft, setZoomDraft] = useState(null);
   const [rotateDraft, setRotateDraft] = useState(null);
   const [brightnessDraft, setBrightnessDraft] = useState(null);
+  const [filterType, setFilterType] = useState(panel.imageFilter || FILTER_TYPES[0].value);
+  const [filterParamValue, setFilterParamValue] = useState(
+    panel.imageFilterParams?.[filterParamMeta(panel.imageFilter || FILTER_TYPES[0].value).key] ??
+      filterParamMeta(panel.imageFilter || FILTER_TYPES[0].value).default
+  );
+  const [filterBusy, setFilterBusy] = useState(false);
+  const [filterError, setFilterError] = useState("");
+
+  // Switching the filter type has no baked history to read a param value back from
+  // (panel.imageFilterParams only ever holds params for whichever type is currently/was
+  // last baked) — unless you're switching back to that exact type, in which case restore
+  // what was actually baked rather than resetting to the generic default.
+  const onChangeFilterType = (type) => {
+    setFilterType(type);
+    const meta = filterParamMeta(type);
+    setFilterParamValue(type === panel.imageFilter ? panel.imageFilterParams?.[meta.key] ?? meta.default : meta.default);
+  };
 
   // PanelEditor remounts per-panel (see key={selectedPanel.id} at the call site) so a
   // stale candidate never shows for the wrong panel — this just avoids leaking the
@@ -2555,6 +2678,31 @@ function PanelEditor({
     discardEdit();
   };
 
+  // Bakes (or re-bakes, e.g. after changing type or the slider) a filter derivative from
+  // the panel's current ORIGINAL image — the original itself is never touched, so this
+  // commits immediately rather than going through an accept/discard step like requestEdit
+  // above.
+  const applyFilter = async () => {
+    setFilterBusy(true);
+    setFilterError("");
+    try {
+      const meta = filterParamMeta(filterType);
+      await api.applyPanelFilter(projectId, page.id, panel.id, filterType, { [meta.key]: filterParamValue });
+      await onUpdated();
+    } catch (err) {
+      setFilterError(err.message);
+    } finally {
+      setFilterBusy(false);
+    }
+  };
+
+  // Just flips which already-on-disk file (original vs. derivative) imageUrl points at —
+  // see withPanelImage on the backend — so toggling back and forth is instant either way.
+  const toggleFilter = async (enabled) => {
+    await api.updatePanel(projectId, page.id, panel.id, { imageFilterEnabled: enabled });
+    await onUpdated();
+  };
+
   // Percentages relative to the marker box's own rendered bounding rect, which is sized
   // via editMarkerAspect to exactly match the image's natural aspect ratio (see onLoad
   // below) — so these percentages line up 1:1 with the image-pixel math the backend does
@@ -2649,6 +2797,9 @@ function PanelEditor({
   };
   const setExpressionThickness = (markId, thickness) => {
     onCommitExpressions(panel.id, expressions.map((m) => (m.id === markId ? { ...m, thickness } : m)));
+  };
+  const setExpressionLineCount = (markId, lineCount) => {
+    onCommitExpressions(panel.id, expressions.map((m) => (m.id === markId ? { ...m, lineCount } : m)));
   };
   const removeExpression = (markId) => {
     onCommitExpressions(panel.id, expressions.filter((m) => m.id !== markId));
@@ -2868,6 +3019,64 @@ function PanelEditor({
                 />
                 <span className="panel-zoom-value">%</span>
               </label>
+            </div>
+          )}
+
+          {panel.hasImage && (
+            <div className="panel-screentone">
+              <label className="panel-zoom-control">
+                Filter
+                <select
+                  className="bubble-list-font"
+                  value={filterType}
+                  onChange={(e) => onChangeFilterType(e.target.value)}
+                >
+                  {FILTER_TYPES.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="panel-zoom-control">
+                {filterParamMeta(filterType).label}
+                <input
+                  type="range"
+                  min={filterParamMeta(filterType).min}
+                  max={filterParamMeta(filterType).max}
+                  step={filterParamMeta(filterType).step}
+                  value={filterParamValue}
+                  onChange={(e) => setFilterParamValue(parseFloat(e.target.value))}
+                />
+                <input
+                  type="number"
+                  className="panel-number-input"
+                  min={filterParamMeta(filterType).min}
+                  max={filterParamMeta(filterType).max}
+                  step={filterParamMeta(filterType).step}
+                  value={filterParamValue}
+                  onChange={(e) => {
+                    const meta = filterParamMeta(filterType);
+                    setFilterParamValue(clamp(parseFloat(e.target.value) || meta.default, meta.min, meta.max));
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                />
+                <span className="panel-zoom-value">{filterParamMeta(filterType).unit}</span>
+              </label>
+              <button className="panel-image-action-btn" onClick={applyFilter} disabled={filterBusy}>
+                {filterBusy ? "Applying filter…" : panel.hasFilter ? "Re-apply filter" : "Apply filter"}
+              </button>
+              {panel.hasFilter && (
+                <label className="bubble-list-bold panel-screentone-toggle">
+                  <input
+                    type="checkbox"
+                    checked={!!panel.imageFilterEnabled}
+                    onChange={(e) => toggleFilter(e.target.checked)}
+                  />
+                  Show filter
+                </label>
+              )}
+              {filterError && <p className="error">{filterError}</p>}
             </div>
           )}
 
@@ -3132,6 +3341,34 @@ function PanelEditor({
                     />
                   </div>
                 </label>
+                {m.type === "speedlines" && (
+                  <label className="bubble-list-thickness">
+                    Line count
+                    <div className="bubble-list-thickness-controls">
+                      <input
+                        type="range"
+                        min={MIN_LINE_COUNT}
+                        max={MAX_LINE_COUNT}
+                        step="1"
+                        value={m.lineCount ?? DEFAULT_LINE_COUNT}
+                        onChange={(e) => setExpressionLineCount(m.id, parseInt(e.target.value, 10) || DEFAULT_LINE_COUNT)}
+                      />
+                      <input
+                        type="number"
+                        min={MIN_LINE_COUNT}
+                        max={MAX_LINE_COUNT}
+                        step="1"
+                        value={m.lineCount ?? DEFAULT_LINE_COUNT}
+                        onChange={(e) =>
+                          setExpressionLineCount(
+                            m.id,
+                            clamp(parseInt(e.target.value, 10) || DEFAULT_LINE_COUNT, MIN_LINE_COUNT, MAX_LINE_COUNT)
+                          )
+                        }
+                      />
+                    </div>
+                  </label>
+                )}
               </div>
             ))}
             {expressions.length === 0 && <p className="empty-hint">No expression marks yet.</p>}
