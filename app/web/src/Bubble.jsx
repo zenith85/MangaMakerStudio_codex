@@ -423,7 +423,7 @@ function startPointerDrag(e, onMove, onEnd) {
 // image. Read-only when `editable` is false (viewing the page); when true — the panel
 // is the one currently open in the editor — it can be dragged, resized, have its tail
 // aimed by dragging the tail tip, and have its text edited in place via double-click.
-export default function Bubble({ bubble, containerRef, editable, onChange, onDelete, customFonts = [] }) {
+export default function Bubble({ bubble, containerRef, editable, onChange, onDelete, customFonts = [], lang = "en" }) {
   const [editingText, setEditingText] = useState(false);
 
   const containerRect = () => containerRef.current.getBoundingClientRect();
@@ -533,10 +533,21 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     );
   };
 
+  // While viewing a translated language, editing edits THAT translation directly (lets
+  // a bad AI translation be hand-corrected) rather than the original — see displayText
+  // below, this is always editing whatever's actually on screen. Editing the original
+  // (lang === "en") clears every cached translation instead: they were translated from
+  // the old text and would silently show stale dialogue once no longer true.
   const commitText = (text) => {
     setEditingText(false);
-    onChange({ text }, { commit: true });
+    if (lang !== "en") {
+      onChange({ translations: { ...(bubble.translations || {}), [lang]: text } }, { commit: true });
+    } else {
+      onChange({ text, translations: undefined }, { commit: true });
+    }
   };
+
+  const displayText = lang !== "en" ? bubble.translations?.[lang] ?? bubble.text : bubble.text;
 
   // The outline (fill + border, tail spliced in) lives in an SVG, separate from the text
   // — clip-path (used to keep text from spilling into the shape's corners) clips its own
@@ -614,8 +625,10 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontWeight: bubble.bold ? "bold" : undefined,
                 color: bubble.textColor || undefined,
                 WebkitTextStroke: boldStroke,
+                direction: lang === "ar" ? "rtl" : undefined,
+                textAlign: lang === "ar" ? "right" : undefined,
               }}
-              defaultValue={bubble.text}
+              defaultValue={displayText}
               autoFocus
               onPointerDown={(e) => e.stopPropagation()}
               onBlur={(e) => commitText(e.target.value)}
@@ -632,11 +645,13 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontWeight: bubble.bold ? "bold" : undefined,
                 color: bubble.textColor || undefined,
                 WebkitTextStroke: boldStroke,
+                direction: lang === "ar" ? "rtl" : undefined,
+                textAlign: lang === "ar" ? "right" : undefined,
               }}
             >
               {isAscendShape(bubble.shape)
-                ? renderAscendText(bubble.text, bubble.fontSize || DEFAULT_FONT_SIZE)
-                : bubble.text}
+                ? renderAscendText(displayText, bubble.fontSize || DEFAULT_FONT_SIZE)
+                : displayText}
             </div>
           )}
         </div>

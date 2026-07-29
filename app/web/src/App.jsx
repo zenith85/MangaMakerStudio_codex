@@ -338,6 +338,17 @@ function filterParamMeta(type) {
   return FILTER_TYPES.find((f) => f.value === type)?.param ?? FILTER_TYPES[0].param;
 }
 
+// Mirrors server/index.js's TRANSLATE_LANGUAGE_NAMES keys — "en" is the original (never
+// sent to the backend, just flips the page's display flag back), the rest go through
+// the /translate route.
+const BUBBLE_LANGUAGES = [
+  { value: "en", label: "English (original)" },
+  { value: "ko", label: "한국어 (Korean)" },
+  { value: "ja", label: "日本語 (Japanese)" },
+  { value: "zh", label: "中文 (Chinese)" },
+  { value: "ar", label: "العربية (Arabic)" },
+];
+
 const STYLE_PRESETS = [
   { value: "manga_bw", label: "Manga (B&W, screentone detail)" },
   { value: "manga_simple", label: "Manga (B&W, simple/clean)" },
@@ -617,6 +628,8 @@ export default function App() {
   const [cbzBusy, setCbzBusy] = useState(false);
   const [cbzStatus, setCbzStatus] = useState("");
   const [cbzSavedPath, setCbzSavedPath] = useState("");
+  const [translateBusy, setTranslateBusy] = useState(false);
+  const [translateError, setTranslateError] = useState("");
   const pageCanvasRef = useRef(null);
 
   // "checking" | "online" | "offline" — whether a local agent is running on THIS
@@ -651,6 +664,35 @@ export default function App() {
       await api.openProjectFile(currentProjectId, cbzSavedPath);
     } catch (err) {
       setCbzStatus(`Failed: ${err.message}`);
+    }
+  };
+
+  // Switching back to a language already shown before is instant — bubble.translations
+  // is never cleared by this, only by hand-editing a bubble's original text (see
+  // Bubble.jsx's commitText) — so there's nothing to re-translate, just flip the page's
+  // display flag via the plain page PATCH. Switching TO a new language calls the actual
+  // /translate route, which only pays for a Codex call on bubbles it hasn't already
+  // translated.
+  const changeLanguage = async (targetLang) => {
+    if (!currentPage) return;
+    setTranslateError("");
+    const applyUpdatedPage = (updated) => {
+      setCurrentPage(updated);
+      setPages((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    };
+    if (targetLang === "en") {
+      const updated = await api.updatePage(currentProjectId, currentPage.id, { language: "en" });
+      applyUpdatedPage(updated);
+      return;
+    }
+    setTranslateBusy(true);
+    try {
+      const updated = await api.translatePage(currentProjectId, currentPage.id, targetLang);
+      applyUpdatedPage(updated);
+    } catch (err) {
+      setTranslateError(err.message);
+    } finally {
+      setTranslateBusy(false);
     }
   };
 
@@ -1163,6 +1205,9 @@ export default function App() {
           cbzStatus={cbzStatus}
           cbzSavedPath={cbzSavedPath}
           onOpenSavedCbz={openSavedCbz}
+          onChangeLanguage={changeLanguage}
+          translateBusy={translateBusy}
+          translateError={translateError}
         />
         {currentPage ? (
           <div className="page-canvas-nav">
@@ -1183,6 +1228,7 @@ export default function App() {
               onDragImage={dragPanelImage}
               onDragImageEnd={commitPanelImage}
               customFonts={customFonts}
+              lang={currentPage.language || "en"}
               onBubblesLive={updateBubblesLive}
               onBubblesCommit={commitBubbles}
               onExpressionsLive={updateExpressionsLive}
@@ -1725,14 +1771,28 @@ function PageBar({
   cbzStatus,
   cbzSavedPath,
   onOpenSavedCbz,
+  onChangeLanguage,
+  translateBusy,
+  translateError,
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showLayoutPicker, setShowLayoutPicker] = useState(false);
+  const [showLangMenu, setShowLangMenu] = useState(false);
   const [title, setTitle] = useState("");
   const [layout, setLayout] = useState("grid-2x2");
   const [stylePreset, setStylePreset] = useState("manga_bw");
   const menuRef = useRef(null);
+  const langMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!showLangMenu) return;
+    const onDocPointerDown = (e) => {
+      if (langMenuRef.current && !langMenuRef.current.contains(e.target)) setShowLangMenu(false);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [showLangMenu]);
 
   // One shared popover anchor (the ⋮ button) for both the action list and the layout
   // grid — closes both on an outside click, same trigger point either way instead of
@@ -1763,6 +1823,40 @@ function PageBar({
 
   return (
     <div className="page-bar">
+      {currentPage && (
+        <div className="page-menu-wrap" ref={langMenuRef}>
+          <button
+            type="button"
+            className="page-language-toggle"
+            onClick={() => setShowLangMenu((v) => !v)}
+            disabled={translateBusy}
+            title="Translate every speech bubble on this page, or switch back to the original"
+          >
+            {translateBusy
+              ? "Translating…"
+              : BUBBLE_LANGUAGES.find((l) => l.value === (currentPage.language || "en"))?.label}
+          </button>
+
+          {showLangMenu && (
+            <div className="page-menu-popover">
+              {BUBBLE_LANGUAGES.map((l) => (
+                <button
+                  key={l.value}
+                  type="button"
+                  className={`page-menu-item${l.value === (currentPage.language || "en") ? " active" : ""}`}
+                  onClick={() => {
+                    setShowLangMenu(false);
+                    onChangeLanguage(l.value);
+                  }}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <select value={currentPage?.id || ""} onChange={(e) => onOpen(e.target.value)}>
         <option value="" disabled>
           Select a page…
@@ -1902,6 +1996,7 @@ function PageBar({
           Open
         </button>
       )}
+      {translateError && <span className="pdf-status pdf-status-error">{translateError}</span>}
 
       {showForm && (
         <form className="new-page-form" onSubmit={submit}>
@@ -1973,6 +2068,7 @@ function PageCanvas({
   onDragImage,
   onDragImageEnd,
   customFonts,
+  lang,
   onBubblesLive,
   onBubblesCommit,
   onExpressionsLive,
@@ -2013,6 +2109,7 @@ function PageCanvas({
             onDragImage={onDragImage}
             onDragImageEnd={onDragImageEnd}
             customFonts={customFonts}
+            lang={lang}
             onBubblesLive={onBubblesLive}
             onBubblesCommit={onBubblesCommit}
             onExpressionsLive={onExpressionsLive}
@@ -2048,6 +2145,7 @@ function PageCanvas({
           onDragImage={onDragImage}
           onDragImageEnd={onDragImageEnd}
           customFonts={customFonts}
+          lang={lang}
           onBubblesLive={onBubblesLive}
           onBubblesCommit={onBubblesCommit}
           onExpressionsLive={onExpressionsLive}
@@ -2102,6 +2200,7 @@ function PanelThumb({
   onFloatingLive,
   onFloatingCommit,
   customFonts,
+  lang,
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
@@ -2437,6 +2536,7 @@ function PanelThumb({
           onChange={(patch, opts) => updateBubble(bubble.id, patch, opts)}
           onDelete={() => deleteBubble(bubble.id)}
           customFonts={customFonts}
+          lang={lang}
         />
       ))}
 

@@ -136,3 +136,65 @@ export async function generateImageViaCodex(projectId, outputPath, prompt, refer
     fs.rmSync(scratchDir, { recursive: true, force: true });
   }
 }
+
+// Batch-translates an array of manga speech-bubble texts via Codex CLI — same shared
+// terminal + poll-for-output-file mechanism as generateImageViaCodex above, since a live
+// PTY has no clean "done" signal to hook a return value onto. Codex is asked to write a
+// JSON array (same order, same length) to a scratch file rather than just printing to
+// the terminal, since nothing here parses the terminal's own output stream.
+export async function translateTextsViaCodex(projectId, texts, targetLanguageName) {
+  if (texts.length === 0) return [];
+  const projectDir = path.join(PROJECTS_DIR, projectId);
+  const scratchDir = path.join(projectDir, ".tmp", nanoid(8));
+  fs.mkdirSync(scratchDir, { recursive: true });
+  const startedAtMs = Date.now();
+
+  try {
+    const inputPath = path.join(scratchDir, "input.json");
+    const outputPath = path.join(scratchDir, "output.json");
+    fs.writeFileSync(inputPath, JSON.stringify(texts, null, 2));
+
+    const fullPrompt =
+      `Read the JSON array of strings at ${inputPath} — each string is one manga speech-bubble's ` +
+      `dialogue, in order. Translate every single one into natural, concise ${targetLanguageName} ` +
+      `suitable for manga/comic dialogue (keep the tone, register, and punctuation style; keep it ` +
+      `punchy, not overly formal). Write a JSON array of the exact same length, in the exact same ` +
+      `order, containing ONLY the translated strings as plain JSON strings (no extra keys, no ` +
+      `commentary, no markdown code fences) to ${outputPath}. Reply with only the absolute file path.`;
+
+    const command = [
+      "codex",
+      "exec",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "workspace-write",
+      "--cd",
+      shellQuote(projectDir),
+      shellQuote(fullPrompt),
+    ].join(" ");
+
+    runInProjectTerminal(projectId, command);
+
+    const deadline = startedAtMs + CODEX_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(outputPath) && fs.statSync(outputPath).mtimeMs >= startedAtMs) break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    if (!fs.existsSync(outputPath) || fs.statSync(outputPath).mtimeMs < startedAtMs) {
+      throw new CodexError("codex exec did not produce a translation file in time");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    } catch {
+      throw new CodexError("codex exec produced invalid JSON for the translation");
+    }
+    if (!Array.isArray(parsed) || parsed.length !== texts.length) {
+      throw new CodexError("codex exec returned a translation array of the wrong length");
+    }
+    return parsed.map((s) => String(s));
+  } finally {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  }
+}

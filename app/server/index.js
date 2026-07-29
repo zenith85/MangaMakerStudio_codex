@@ -37,7 +37,7 @@ import {
   createFont,
   deleteFont,
 } from "./store.js";
-import { generateImageViaCodex, CodexError } from "./codex.js";
+import { generateImageViaCodex, translateTextsViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
 import { applyImageFilter } from "./imageFilters.js";
 import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
@@ -446,7 +446,11 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
   const page = pages.find((p) => p.id === pageId);
   if (!page) return res.status(404).json({ error: "page not found" });
 
-  const { layout, panelCount, gridColumns, gridRows } = req.body;
+  const { layout, panelCount, gridColumns, gridRows, language } = req.body;
+  // Which language's text every bubble on this page currently displays/edits — "en" (or
+  // absent) is the original; switching to a translated language never touches bubble.text
+  // itself (see the /translate route), so this alone is enough to flip back instantly.
+  if (language !== undefined) page.language = language;
   if (layout) {
     page.layout = layout;
     // A different layout has an entirely different grid-area structure, so any hand-
@@ -474,6 +478,61 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
 
   savePages(projectId, pages);
   res.json(withPageImages(projectId, page));
+});
+
+// Keyed by language code (matches the frontend's BUBBLE_LANGUAGES in App.jsx and
+// bubble.translations' own keys) — adding another language later is just another entry
+// here plus a button, not a schema change.
+const TRANSLATE_LANGUAGE_NAMES = { ko: "Korean", ja: "Japanese", zh: "Chinese (Simplified)", ar: "Arabic" };
+
+// Translates every speech bubble's text on a page into another language via Codex, and
+// switches the page to display it — a bubble's ORIGINAL text (bubble.text) never
+// changes; translations live in a separate bubble.translations[langCode] field, so
+// switching back (see the generic PATCH above, `{ language: "en" }`) is instant and the
+// original is always recoverable. Already-translated bubbles are skipped (cheap re-
+// toggle after the first translate), so only genuinely new/changed text costs a Codex
+// call — see Bubble.jsx's commitText, which clears a bubble's translations when its
+// original text is hand-edited so a stale translation can't be shown as current.
+app.post("/api/projects/:projectId/pages/:pageId/translate", async (req, res) => {
+  try {
+    const { projectId, pageId } = req.params;
+    const targetLang = req.body?.targetLang || "ko";
+    const languageName = TRANSLATE_LANGUAGE_NAMES[targetLang];
+    if (!languageName) return res.status(400).json({ error: `unsupported target language: ${targetLang}` });
+
+    const pages = listPages(projectId);
+    const page = pages.find((p) => p.id === pageId);
+    if (!page) return res.status(404).json({ error: "page not found" });
+
+    const allPanels = [...page.panels, ...(page.floatingPanels || [])];
+    const pendingBubbles = [];
+    for (const panel of allPanels) {
+      for (const bubble of panel.bubbles || []) {
+        const text = (bubble.text || "").trim();
+        if (!text || bubble.translations?.[targetLang]) continue;
+        pendingBubbles.push(bubble);
+      }
+    }
+
+    if (pendingBubbles.length > 0) {
+      const translated = await translateTextsViaCodex(
+        projectId,
+        pendingBubbles.map((b) => b.text),
+        languageName
+      );
+      pendingBubbles.forEach((bubble, i) => {
+        bubble.translations = { ...(bubble.translations || {}), [targetLang]: translated[i] };
+      });
+    }
+
+    page.language = targetLang;
+    savePages(projectId, pages);
+    res.json(withPageImages(projectId, page));
+  } catch (err) {
+    console.error(err);
+    if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Manually sets (or replaces) a panel's image directly, bypassing Codex — for when a

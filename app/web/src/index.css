@@ -447,6 +447,26 @@ textarea {
   flex-shrink: 0;
 }
 
+.page-language-toggle {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 0 12px;
+  height: 34px;
+}
+
+.page-language-toggle:hover {
+  border-color: #4a5cff;
+  color: var(--text-primary);
+}
+
+.page-language-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ---------- Page actions menu (⋮) ---------- */
 
 .page-menu-wrap {
@@ -506,6 +526,11 @@ textarea {
 
 .page-menu-item-danger {
   color: #ff6b6b;
+}
+
+.page-menu-item.active {
+  background: var(--border-soft);
+  font-weight: 600;
 }
 
 .new-page-form {

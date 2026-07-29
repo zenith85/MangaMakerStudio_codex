@@ -44,6 +44,8 @@ export const api = {
   updatePage: (projectId, pageId, body) =>
     req(`/projects/${projectId}/pages/${pageId}`, { method: "PATCH", ...json(body) }),
   deletePage: (projectId, pageId) => req(`/projects/${projectId}/pages/${pageId}`, { method: "DELETE" }),
+  translatePage: (projectId, pageId, targetLang) =>
+    req(`/projects/${projectId}/pages/${pageId}/translate`, { method: "POST", ...json({ targetLang }) }),
 
   updatePanel: (projectId, pageId, panelId, body) =>
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}`, { method: "PATCH", ...json(body) }),
