@@ -1899,6 +1899,11 @@ button.primary:disabled {
   text-align: center;
   overflow: hidden;
   word-break: break-word;
+  /* The textarea preserves line breaks by default while editing — but the read-only
+     display div's default white-space collapses them, so a manual Enter would render
+     as if it never happened once you click away. pre-wrap keeps both that AND normal
+     word-wrapping. */
+  white-space: pre-wrap;
 }
 
 /* Not height: 100% like the textarea below — a full-height block just starts its text at
