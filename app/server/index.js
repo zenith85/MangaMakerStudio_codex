@@ -635,6 +635,22 @@ function slugifyTitle(title) {
   return slug || "untitled";
 }
 
+// The pose-sketch canvas (see App.jsx's PoseSketchPad) sends its drawing as a plain
+// "data:image/png;base64,..." URL rather than a multipart upload — small enough (a few
+// black lines) that JSON is simpler than switching those two routes to FormData just for
+// this one optional field. Returns null for anything falsy/malformed rather than
+// throwing, since a pose sketch is always optional.
+function decodeDataUrl(dataUrl) {
+  if (!dataUrl) return null;
+  const match = /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/.exec(dataUrl);
+  if (!match) return null;
+  try {
+    return Buffer.from(match[1], "base64");
+  } catch {
+    return null;
+  }
+}
+
 // Saves a finished page as a PDF, rendered client-side (the browser already has the
 // exact composed page — panels, images, speech bubbles — on screen) and posted here to
 // live on disk under the project, in projects/<id>/pages/<page title>.pdf.
@@ -722,7 +738,11 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
-    Object.assign(panel, req.body); // sceneDoc
+    // poseSketch is a one-shot input for THIS generation only — pulled out before the
+    // Object.assign below (which persists everything else in the body, e.g. sceneDoc),
+    // since it's a data URL and would otherwise get permanently baked into pages.json.
+    const { poseSketch, ...panelPatch } = req.body;
+    Object.assign(panel, panelPatch); // sceneDoc
     savePages(projectId, pages);
 
     const { plainText, characterIds, placeIds, objectIds, referenceIds, panelIds } = parseSceneDoc(panel.sceneDoc);
@@ -752,12 +772,16 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
         panelId: p.id,
       }));
 
+    const poseSketchBuffer = decodeDataUrl(poseSketch);
     const referenceImages = [
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
       ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
       ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
       ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
+      // Always LAST — see buildPrompt's hasPoseSketch note, which refers to "the LAST
+      // attached reference image".
+      ...(poseSketchBuffer ? [poseSketchBuffer] : []),
     ];
 
     const prompt = buildPrompt({
@@ -768,6 +792,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       references,
       continuityPanels,
       stylePreset: page.stylePreset,
+      hasPoseSketch: !!poseSketchBuffer,
     });
 
     await generateImageViaCodex(projectId, panelImagePath(projectId, pageId, panel.id), prompt, referenceImages);
@@ -795,7 +820,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;
-    const { instructions, sceneDoc, markerRect } = req.body;
+    const { instructions, sceneDoc, markerRect, poseSketch } = req.body;
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
@@ -834,9 +859,11 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
         panelId: p.id,
       }));
 
+    const poseSketchBuffer = decodeDataUrl(poseSketch);
     // Panel being edited goes FIRST (clean, untouched) — buildEditPrompt tells Codex
     // that's the edit target. The marked-up copy, if any, goes SECOND, purely to point
-    // at the edit region. Everything after that is just for matching appearance.
+    // at the edit region. Everything after that is just for matching appearance, with
+    // the pose sketch (if any) always LAST — see buildEditPrompt's hasPoseSketch note.
     const referenceImages = [
       currentImage,
       ...(markedImage ? [markedImage] : []),
@@ -845,6 +872,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
       ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
       ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
+      ...(poseSketchBuffer ? [poseSketchBuffer] : []),
     ];
 
     const prompt = buildEditPrompt({
@@ -856,6 +884,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       continuityPanels,
       stylePreset: page.stylePreset,
       hasMarker: !!markedImage,
+      hasPoseSketch: !!poseSketchBuffer,
     });
     const imageBuf = await generateImageViaCodex(projectId, null, prompt, referenceImages);
 

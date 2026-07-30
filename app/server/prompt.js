@@ -74,6 +74,10 @@ function describeReferencedEntities({ characters = [], places = [], objects = []
   return parts;
 }
 
+// hasPoseSketch: the caller (see index.js's /generate route) always appends the pose
+// sketch, when present, as the LAST reference image — after every entity/continuity
+// image already pushed by describeReferencedEntities — so "the LAST attached reference
+// image" here is unambiguous regardless of how many other references this scene has.
 export function buildPrompt({
   sceneDescription,
   characters,
@@ -82,9 +86,15 @@ export function buildPrompt({
   references = [],
   continuityPanels = [],
   stylePreset,
+  hasPoseSketch = false,
 }) {
   const parts = [sceneDescription?.trim() || "A manga panel."];
   parts.push(...describeReferencedEntities({ characters, places, objects, references, continuityPanels }));
+  if (hasPoseSketch) {
+    parts.push(
+      "The LAST attached reference image is a simple hand-drawn stick-figure sketch showing the desired body pose/motion for the main character in this scene — match that pose and body positioning as closely as possible. Do NOT draw, keep, or reference the stick figure itself; render a normal fully-drawn character in that pose."
+    );
+  }
   parts.push(STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw);
   return parts.join(" ");
 }
@@ -97,7 +107,22 @@ export function buildPrompt({
 // characters/places/objects/references/panels follow after that, so the prompt has to
 // spell out which reference image(s) are the edit target vs. just a locator vs. just for
 // matching appearance.
-export function buildEditPrompt({ instructions, characters = [], places = [], objects = [], references = [], continuityPanels = [], stylePreset, hasMarker = false }) {
+// hasPoseSketch: like buildPrompt above, the caller (index.js's /edit route) always
+// appends the pose sketch, when present, as the very LAST reference image — after the
+// marker copy (if any) and every entity reference image — so "the LAST attached
+// reference image" stays unambiguous regardless of how many other references are
+// attached.
+export function buildEditPrompt({
+  instructions,
+  characters = [],
+  places = [],
+  objects = [],
+  references = [],
+  continuityPanels = [],
+  stylePreset,
+  hasMarker = false,
+  hasPoseSketch = false,
+}) {
   const entityParts = describeReferencedEntities({ characters, places, objects, references, continuityPanels });
   const parts = [
     "Edit the FIRST attached reference image — that is the panel being edited; do not generate an unrelated new scene from scratch.",
@@ -115,6 +140,11 @@ export function buildEditPrompt({ instructions, characters = [], places = [], ob
     const afterNth = hasMarker ? "first two" : "first";
     parts.push(`Any OTHER attached reference images (after the ${afterNth}) are only for matching these, not additional edit targets:`);
     parts.push(...entityParts);
+  }
+  if (hasPoseSketch) {
+    parts.push(
+      "The LAST attached reference image is a simple hand-drawn stick-figure sketch showing the desired body pose/motion for the main character — match that pose and body positioning as closely as possible while applying the requested change. Do NOT draw, keep, or reference the stick figure itself; render a normal fully-drawn character in that pose."
+    );
   }
   parts.push(STYLE_SUFFIX[stylePreset] || STYLE_SUFFIX.manga_bw);
   return parts.join(" ");

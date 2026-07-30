@@ -1674,6 +1674,25 @@ button.primary:disabled {
   padding: 12px;
 }
 
+.pose-sketch-pad {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pose-sketch-canvas {
+  width: 100%;
+  max-width: 260px;
+  aspect-ratio: 1;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
 .panel-image-actions {
   display: flex;
   align-items: center;

@@ -2581,6 +2581,88 @@ function EditCompareModal({ beforeUrl, afterUrl, busy, onKeepOriginal, onKeepEdi
   );
 }
 
+// A freeform sketch canvas for drawing a quick stick-figure pose — sent to Codex as an
+// extra reference image (see buildPrompt/buildEditPrompt's hasPoseSketch) so it can match
+// a desired body position/motion instead of guessing from text alone. Deliberately just a
+// plain drawing surface (not a rigged/posable skeleton) since the ask is to draw a pose,
+// not manipulate a template.
+function PoseSketchPad({ value, onChange, disabled }) {
+  const canvasRef = useRef(null);
+
+  // Only re-synced on mount (and when `value` is cleared to null) — every stroke while
+  // drawing updates the canvas directly via the imperative 2D context, not through a
+  // React re-render, so this effect re-running mid-stroke on every parent render doesn't
+  // fight with what's actively being drawn.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!value) return;
+    const img = new Image();
+    img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    img.src = value;
+  }, [value === null]);
+
+  const getPoint = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  };
+
+  const startDraw = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    let last = getPoint(e);
+    const move = (ev) => {
+      const p = getPoint(ev);
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      onChange(canvasRef.current.toDataURL("image/png"));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    onChange(null);
+  };
+
+  return (
+    <div className="pose-sketch-pad">
+      <canvas
+        ref={canvasRef}
+        width={320}
+        height={320}
+        className="pose-sketch-canvas"
+        onPointerDown={startDraw}
+      />
+      <button type="button" className="panel-image-action-btn" onClick={clear} disabled={disabled}>
+        Clear sketch
+      </button>
+    </div>
+  );
+}
+
 function PanelEditor({
   projectId,
   page,
@@ -2621,6 +2703,12 @@ function PanelEditor({
   const editMarkerBoxRef = useRef(null);
   const editMarkerDragRef = useRef(null);
   const [showCopyFromPanel, setShowCopyFromPanel] = useState(false);
+  // A hand-drawn stick-figure pose guide — shared between Generate/Regenerate (Scene tab)
+  // and Request edit (Edit image tab), since both just send it to Codex as an extra
+  // reference image (see buildPrompt/buildEditPrompt's hasPoseSketch). Ephemeral: never
+  // saved to the panel itself, only used for the next generate/edit call — see PoseSketchPad.
+  const [poseSketch, setPoseSketch] = useState(null); // data URL | null
+  const [showPoseSketch, setShowPoseSketch] = useState(false);
   // Live value while dragging the zoom slider or typing in either number box — null
   // means "not editing, show the committed panel value instead" (see the inputs below).
   const [zoomDraft, setZoomDraft] = useState(null);
@@ -2657,7 +2745,7 @@ function PanelEditor({
     setBusy(true);
     setError("");
     try {
-      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc });
+      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc, poseSketch });
       await onUpdated();
     } catch (err) {
       setError(err.message);
@@ -2753,7 +2841,7 @@ function PanelEditor({
     setEditBusy(true);
     setEditError("");
     try {
-      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarker);
+      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarker, poseSketch);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
     } catch (err) {
@@ -3220,6 +3308,10 @@ function PanelEditor({
             <p className="empty-hint">Add characters, places, objects, or references in the sidebar first.</p>
           )}
 
+          <button type="button" className="panel-image-action-btn" onClick={() => setShowPoseSketch(true)}>
+            {poseSketch ? "✓ Pose reference drawn — edit" : "+ Draw pose reference"}
+          </button>
+
           {error && <p className="error">{error}</p>}
 
           {panel.hasImage ? (
@@ -3286,6 +3378,10 @@ function PanelEditor({
             references={references}
             panels={allPanels.filter((p) => p.id !== panel.id)}
           />
+          <button type="button" className="panel-image-action-btn" onClick={() => setShowPoseSketch(true)}>
+            {poseSketch ? "✓ Pose reference drawn — edit" : "+ Draw pose reference"}
+          </button>
+
           <button
             className="primary"
             onClick={requestEdit}
@@ -3505,6 +3601,24 @@ function PanelEditor({
         onKeepOriginal={discardEdit}
         onKeepEdited={useEditedVersion}
       />
+    )}
+
+    {showPoseSketch && (
+      <div className="modal-backdrop" onClick={() => setShowPoseSketch(false)}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <h2>Pose reference</h2>
+          <p>
+            Draw a quick stick-figure pose to show Codex the body position/motion you
+            want — it's just a guide and won't appear in the generated art.
+          </p>
+          <PoseSketchPad value={poseSketch} onChange={setPoseSketch} />
+          <div className="modal-actions">
+            <button type="button" onClick={() => setShowPoseSketch(false)}>
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );
