@@ -825,15 +825,14 @@ button {
   color: var(--text-muted);
 }
 
-/* .tabs button (above) sets flex: 1 + its own background/border/color for every tab in
-   this row — needs matching specificity (class + tag, not just class) to actually win,
-   and flex: 0 0 auto so these two don't stretch to fill space like the tabs do. */
-.panel-editor-tabs button.panel-move-btn {
-  flex: 0 0 auto;
-  width: 32px;
-  font-size: 18px;
-  line-height: 1;
-  padding: 0;
+/* .tabs button (above) sets flex: 1 + its own background/border/color — needs matching
+   specificity (class + tag, not just class) to actually win. These stay flex: 1 too (unlike
+   the icon-only version this replaced) now that they carry a full "Move earlier/later"
+   label rather than just an arrow glyph. */
+.panel-editor-move-row button.panel-move-btn {
+  font-size: 13px;
+  line-height: 1.2;
+  padding: 6px 4px;
   cursor: pointer;
   border-radius: 6px;
   background: #4a5cff;
@@ -841,12 +840,12 @@ button {
   color: white;
 }
 
-.panel-editor-tabs button.panel-move-btn:hover:not(:disabled) {
+.panel-editor-move-row button.panel-move-btn:hover:not(:disabled) {
   background: #3a4ae0;
   border-color: #3a4ae0;
 }
 
-.panel-editor-tabs button.panel-move-btn:disabled {
+.panel-editor-move-row button.panel-move-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
@@ -1011,6 +1010,10 @@ button {
 }
 
 .panel-editor-tabs {
+  margin-bottom: 10px;
+}
+
+.panel-editor-move-row {
   margin-bottom: 18px;
 }
 

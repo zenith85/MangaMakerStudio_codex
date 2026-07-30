@@ -2853,6 +2853,10 @@ function PanelEditor({
     setImageError("");
     try {
       await api.clearPanelImage(projectId, page.id, panel.id);
+      // The "Edit image" tab only exists while there's an image to point Codex at (see
+      // its button above) — bounce back to Scene so clearing the image doesn't leave the
+      // user stranded on a tab that just disappeared.
+      if (tab === "edit") setTab("scene");
       await onUpdated();
     } catch (err) {
       setImageError(err.message);
@@ -2931,34 +2935,44 @@ function PanelEditor({
         <button className={tab === "expressions" ? "active" : ""} onClick={() => setTab("expressions")}>
           Facials
         </button>
-        {/* Moving means swapping grid slots (see server's reindexPanelOrder) — floating
-            panels have no fixed neighbors to swap with, they're just dragged wherever. */}
-        {!panel.floating && (
-          <>
-            <button
-              className="panel-move-btn"
-              title="Move panel earlier"
-              onClick={() => onMove(panel.id, "left")}
-              disabled={panel.order === 0}
-            >
-              ←
-            </button>
-            <button
-              className="panel-move-btn"
-              title="Move panel later"
-              onClick={() => onMove(panel.id, "right")}
-              disabled={panel.order === page.panels.length - 1}
-            >
-              →
-            </button>
-          </>
+        {/* Only meaningful once there's an image to point Codex at — hidden rather than
+            shown-but-empty for a brand new panel. */}
+        {panel.hasImage && (
+          <button className={tab === "edit" ? "active" : ""} onClick={() => setTab("edit")}>
+            Edit image
+          </button>
         )}
       </div>
 
-      {tab === "scene" && (
+      {/* Moving means swapping grid slots (see server's reindexPanelOrder) — floating
+          panels have no fixed neighbors to swap with, they're just dragged wherever. On
+          its own row (not crammed alongside the 4 tabs above) so both rows have room to
+          show their full label instead of squeezing 6 buttons into one line. */}
+      {!panel.floating && (
+        <div className="tabs panel-editor-move-row">
+          <button
+            className="panel-move-btn"
+            title="Move panel earlier"
+            onClick={() => onMove(panel.id, "left")}
+            disabled={panel.order === 0}
+          >
+            ← Move earlier
+          </button>
+          <button
+            className="panel-move-btn"
+            title="Move panel later"
+            onClick={() => onMove(panel.id, "right")}
+            disabled={panel.order === page.panels.length - 1}
+          >
+            Move later →
+          </button>
+        </div>
+      )}
+
+      {(tab === "scene" || tab === "edit") && (
         <p className="scene-editor-hint">
           <strong>#</strong> character/place/object, <strong>!</strong> reference image,{" "}
-          <strong>@</strong> another panel — in either editor below.
+          <strong>@</strong> another panel — in the editor below.
         </p>
       )}
 
@@ -3208,13 +3222,19 @@ function PanelEditor({
 
           {error && <p className="error">{error}</p>}
 
-          <button className="primary" onClick={generate} disabled={busy}>
-            {busy ? "Generating…" : panel.hasImage ? "Regenerate panel" : "Generate panel"}
-          </button>
+          {panel.hasImage ? (
+            <button className="primary" onClick={generate} disabled={busy}>
+              {busy ? "Generating…" : "Regenerate panel"}
+            </button>
+          ) : (
+            <button className="primary" onClick={generate} disabled={busy}>
+              {busy ? "Generating…" : "Generate panel"}
+            </button>
+          )}
         </section>
       )}
 
-      {tab === "scene" && panel.hasImage && (
+      {tab === "edit" && panel.hasImage && (
         <section className="panel-editor-lower">
           <h4>Edit generated image</h4>
           <p className="scene-editor-hint">
