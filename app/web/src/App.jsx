@@ -1636,6 +1636,12 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
     uploadImage(file);
   };
 
+  const onImageDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("image/")) pickImage(file);
+  };
+
   const uploadImage = async (file) => {
     setBusy(true);
     setError("");
@@ -1718,9 +1724,21 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
             )}
 
             {pendingPreviewUrl || entity?.imageUrl ? (
-              <img className="entity-preview" src={pendingPreviewUrl || entity.imageUrl} alt={name || entity?.name} />
+              <img
+                className="entity-preview"
+                src={pendingPreviewUrl || entity.imageUrl}
+                alt={name || entity?.name}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={onImageDrop}
+              />
             ) : (
-              <div className="entity-preview entity-preview-empty">No image yet</div>
+              <div
+                className="entity-preview entity-preview-empty"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={onImageDrop}
+              >
+                Drop an image here, or choose one below
+              </div>
             )}
 
             {!generatable || imageTab === "create" ? (
