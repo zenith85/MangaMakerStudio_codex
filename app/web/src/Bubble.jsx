@@ -378,6 +378,36 @@ export function dotTrailPoints(boundary, bubble, steps = 3) {
   return dots;
 }
 
+// An open, jagged lightning-bolt connector from the bubble's edge to the tail point —
+// unlike "spike" (spliced into the outline, converging to a single point) or "dots" (a
+// shrinking trail), this never converges: it's a standalone zigzag stroke with rounded,
+// open ends. Meant for chaining two bubbles that share one continuous line of dialogue
+// (drag the tail tip onto/near the other bubble) rather than pointing at a speaker's
+// mouth, so nothing about it narrows to a tip the way a real speech tail would.
+export function archTailPoints(boundary, bubble, zigzags = 3) {
+  if (!bubble.tail) return [];
+  const tlx = ((bubble.tail.x - bubble.x) / bubble.width) * 100;
+  const tly = ((bubble.tail.y - bubble.y) / bubble.height) * 100;
+  const angle = Math.atan2(tly - 50, tlx - 50);
+  const { point: base } = boundaryPointAtAngle(boundary, angle);
+
+  const dx = tlx - base.x;
+  const dy = tly - base.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len; // unit vector perpendicular to the base→tip line
+  const py = dx / len;
+  const zigWidth = Math.min(6, len / 4); // percent — half-width of each zigzag jog
+
+  const points = [base];
+  for (let i = 1; i < zigzags; i++) {
+    const t = i / zigzags;
+    const sign = i % 2 === 0 ? 1 : -1;
+    points.push({ x: base.x + dx * t + px * zigWidth * sign, y: base.y + dy * t + py * zigWidth * sign });
+  }
+  points.push({ x: tlx, y: tly });
+  return points;
+}
+
 export function pointsToString(pts) {
   return pts.map((p) => `${p.x},${p.y}`).join(" ");
 }
@@ -562,9 +592,13 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
     transform: rotate ? `rotate(${rotate}deg)` : undefined,
   };
   const boundary = boundaryFor(bubble.shape);
-  const tailStyle = tailStyleFor(bubble.shape);
+  // bubble.tailStyle is an independent per-bubble override (see the "Arch" switch in
+  // ShapePicker) — set, it wins over whatever the shape would normally use; unset, falls
+  // back to the shape's own convention (spike vs. the thought/dreamy/spooky dot trail).
+  const tailStyle = bubble.tailStyle === "arch" ? "arch" : tailStyleFor(bubble.shape);
   const outline = tailStyle === "spike" ? outlineWithTail(boundary, bubble) : boundary;
   const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
+  const archPoints = tailStyle === "arch" ? archTailPoints(boundary, bubble) : [];
   const dashed = isDashed(bubble.shape);
   const noBackground = hasNoBackground(bubble.shape);
   // font-weight: bold only has something to switch to on fonts that actually ship a bold
@@ -613,6 +647,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
           {dots.map((d, i) => (
             <circle key={i} cx={d.x} cy={d.y} r={d.r} vectorEffect="non-scaling-stroke" />
           ))}
+          {archPoints.length > 0 && <polyline points={pointsToString(archPoints)} vectorEffect="non-scaling-stroke" />}
         </svg>
 
         <div className="bubble-text-clip" style={{ clipPath: pointsToClipPath(boundary) }}>

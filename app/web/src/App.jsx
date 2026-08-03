@@ -2979,6 +2979,9 @@ function PanelEditor({
     const tail = wantTail ? bubble.tail || defaultTailFor(bubble) : null;
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubble.id ? { ...b, tail } : b)));
   };
+  const setBubbleTailStyle = (bubbleId, tailStyle) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, tailStyle } : b)));
+  };
   const setBubbleFont = (bubbleId, font) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, font } : b)));
   };
@@ -3439,6 +3442,7 @@ function PanelEditor({
                   bubble={b}
                   onSetShape={(shape) => setBubbleShape(b.id, shape)}
                   onSetTail={(wantTail) => setBubbleTail(b, wantTail)}
+                  onSetTailStyle={(tailStyle) => setBubbleTailStyle(b.id, tailStyle)}
                 />
                 <select
                   className="bubble-list-font"
@@ -3484,9 +3488,9 @@ function PanelEditor({
                   <input
                     type="number"
                     min="6"
-                    max="60"
+                    max="120"
                     value={b.fontSize || DEFAULT_FONT_SIZE}
-                    onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 60))}
+                    onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 120))}
                   />
                 </label>
                 <label className="bubble-list-font-size">

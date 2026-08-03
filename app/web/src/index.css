@@ -1900,6 +1900,17 @@ button.primary:disabled {
   stroke-linejoin: round;
 }
 
+/* The "arch"/thunder tail (see archTailPoints in Bubble.jsx) is an open zigzag, not a
+   closed shape — needs its own rule since fill: white (above) would try to fill the gap
+   between the line and an implicit closing edge, drawing a stray triangle. */
+.bubble-outline polyline {
+  fill: none;
+  stroke: #1a1a1a;
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
 .bubble-text-clip {
   position: absolute;
   inset: 0;

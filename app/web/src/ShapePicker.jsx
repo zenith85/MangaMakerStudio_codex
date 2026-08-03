@@ -175,11 +175,15 @@ function TailToggle({ hasTail, onToggle }) {
 
 // Lets you pick a bubble's shape from a dropdown — each option shows an actual rendered
 // example instead of relying on a text label alone — and flip whether it has a tail at
-// all with a simple switch.
-export default function ShapePicker({ bubble, onSetShape, onSetTail }) {
+// all with a simple switch. When it has one, a second switch swaps the normal
+// spike/dot-trail tail for an open "arch" (zigzag, never converges to a point) — meant
+// for visually bridging two bubbles that share one continuous line of dialogue, not for
+// pointing at a speaker's mouth.
+export default function ShapePicker({ bubble, onSetShape, onSetTail, onSetTailStyle }) {
   const resolved = resolveShape(bubble.shape);
   const currentShape = SHAPES.find((s) => s.value === resolved);
   const hasTail = !!bubble.tail;
+  const isArchTail = bubble.tailStyle === "arch";
 
   return (
     <div className="shape-picker">
@@ -193,6 +197,20 @@ export default function ShapePicker({ bubble, onSetShape, onSetTail }) {
         onPick={onSetShape}
       />
       <TailToggle hasTail={hasTail} onToggle={onSetTail} />
+      {hasTail && (
+        <label className="tail-toggle" title="An open zigzag connector instead of a normal tail — for linking two bubbles">
+          <span className="tail-toggle-label">Arch</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isArchTail}
+            className={`tail-toggle-switch${isArchTail ? " on" : ""}`}
+            onClick={() => onSetTailStyle(isArchTail ? "default" : "arch")}
+          >
+            <span className="tail-toggle-knob" />
+          </button>
+        </label>
+      )}
     </div>
   );
 }
