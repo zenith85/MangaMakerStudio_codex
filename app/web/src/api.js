@@ -83,6 +83,23 @@ export const api = {
     }
     return res.blob();
   },
+  // A follow-up "after edit chat" message (see EditCompareModal) — re-edits `baseImage`
+  // (the CURRENT candidate, as a data URL) with a plain-text instruction rather than the
+  // original panel image, chaining refinements. Same raw-bytes response as
+  // requestPanelEdit, and for the same reason: still just a preview, nothing committed.
+  refinePanelEdit: async (projectId, pageId, panelId, instructions, baseImage) => {
+    const res = await fetch(`${BASE}/projects/${projectId}/pages/${pageId}/panels/${panelId}/edit`, {
+      method: "POST",
+      ...json({ instructions, baseImage }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const err = new Error(body.error || res.statusText);
+      err.code = body.code;
+      throw err;
+    }
+    return res.blob();
+  },
   // Unlike requestPanelEdit above, this commits immediately — it only ever bakes a
   // derivative file (filter.png) alongside the untouched original, so there's no
   // "candidate" step needed. Returns the updated panel (imageFilterEnabled: true, new

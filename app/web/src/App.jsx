@@ -2176,6 +2176,20 @@ function PageCanvas({
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 
+// Used to hand the CURRENT edit candidate (only ever held in memory as a Blob — see
+// editCandidate) back to the server as a follow-up edit's base image, the same way
+// poseSketch already travels as a data URL (see decodeDataUrl server-side) — chaining
+// refinements onto the latest candidate instead of restarting from the original panel
+// image every time.
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 // object-fit: cover sizes the image to exactly fill the (axis-aligned) frame — rotating
 // that already-fitted box with a plain CSS rotate() just spins it in place, which uncovers
 // the frame's corners (or past 45°, most of it, since the box's long/short axes swap
@@ -2577,12 +2591,29 @@ function PanelThumb({
 // actually judge the change. Clicking either image IS the decision (no separate "keep
 // this one" button to also click); there's no backdrop-dismiss, since "before" already
 // covers "never mind, keep what I had."
-function EditCompareModal({ beforeUrl, afterUrl, busy, onKeepOriginal, onKeepEdited }) {
+// Stays open across as many rounds of chat refinement as wanted — clicking Before/After
+// is the only thing that actually closes it (commits or discards). The chat box lets you
+// say "I don't like this" or "add more X" without forcing a decision yet; each message
+// re-edits the CURRENT "after" candidate (see sendEditChatMessage in PanelEditor), so
+// it's a real chain of refinements, not repeated one-shot edits of the original.
+function EditCompareModal({
+  beforeUrl,
+  afterUrl,
+  busy,
+  onKeepOriginal,
+  onKeepEdited,
+  chat,
+  chatInput,
+  onChatInputChange,
+  onSendChat,
+  chatBusy,
+  chatError,
+}) {
   return (
     <div className="modal-backdrop">
       <div className="modal edit-compare-modal">
         <h2>Choose a version</h2>
-        <p className="scene-editor-hint">Click the image you want to keep.</p>
+        <p className="scene-editor-hint">Click the image you want to keep, or refine the After below first.</p>
         <div className="edit-compare-grid">
           <button type="button" className="edit-compare-option" onClick={onKeepOriginal} disabled={busy}>
             <span className="edit-compare-label">Before</span>
@@ -2594,6 +2625,38 @@ function EditCompareModal({ beforeUrl, afterUrl, busy, onKeepOriginal, onKeepEdi
           </button>
         </div>
         {busy && <p className="empty-hint">Saving…</p>}
+
+        <div className="edit-chat">
+          <h4>After edit chat</h4>
+          {chat.length > 0 && (
+            <div className="edit-chat-log">
+              {chat.map((m, i) => (
+                <p key={i} className="edit-chat-message">
+                  {m.text}
+                </p>
+              ))}
+            </div>
+          )}
+          <div className="edit-chat-input-row">
+            <textarea
+              className="edit-chat-input"
+              placeholder="I don't like this — try making the pose calmer, or add more background detail…"
+              value={chatInput}
+              disabled={chatBusy || busy}
+              onChange={(e) => onChatInputChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  onSendChat();
+                }
+              }}
+            />
+            <button type="button" className="primary" onClick={onSendChat} disabled={chatBusy || busy || !chatInput.trim()}>
+              {chatBusy ? "Refining…" : "Send"}
+            </button>
+          </div>
+          {chatError && <p className="error">{chatError}</p>}
+        </div>
       </div>
     </div>
   );
@@ -2713,6 +2776,15 @@ function PanelEditor({
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
+  // "After edit" chat — follow-up plain-text notes ("I don't like this", "add more X")
+  // that refine the CURRENT candidate further without closing the compare modal. Each
+  // message re-edits the latest candidate (not the original panel image), so it's a
+  // real chain of refinements. Reset whenever a fresh edit session starts (requestEdit)
+  // or ends (discardEdit).
+  const [editChat, setEditChat] = useState([]); // [{ text }]
+  const [editChatInput, setEditChatInput] = useState("");
+  const [editChatBusy, setEditChatBusy] = useState(false);
+  const [editChatError, setEditChatError] = useState("");
   // Marks the region that needs the change, as 0-100 percentages of the panel's own
   // image — drawn by the user over the preview below, sent alongside the edit request,
   // but never part of the edited result (see backend's drawMarkerRect/buildEditPrompt).
@@ -2862,10 +2934,38 @@ function PanelEditor({
       const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarker, poseSketch);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
+      // A fresh edit request starts a new refinement session — any chat from a
+      // previous candidate no longer applies to this one.
+      setEditChat([]);
+      setEditChatInput("");
+      setEditChatError("");
     } catch (err) {
       setEditError(err.message);
     } finally {
       setEditBusy(false);
+    }
+  };
+
+  // A follow-up note on the CURRENT candidate ("I don't like this", "add more X") —
+  // re-edits that candidate itself (not the original panel image), so the compare
+  // modal can stay open through several rounds of back-and-forth before anything is
+  // actually committed or discarded.
+  const sendEditChatMessage = async () => {
+    const text = editChatInput.trim();
+    if (!text || !editCandidate) return;
+    setEditChatBusy(true);
+    setEditChatError("");
+    try {
+      const baseImage = await blobToDataUrl(editCandidate.blob);
+      const blob = await api.refinePanelEdit(projectId, page.id, panel.id, text, baseImage);
+      URL.revokeObjectURL(editCandidate.url);
+      setEditCandidate({ blob, url: URL.createObjectURL(blob) });
+      setEditChat((prev) => [...prev, { text }]);
+      setEditChatInput("");
+    } catch (err) {
+      setEditChatError(err.message);
+    } finally {
+      setEditChatBusy(false);
     }
   };
 
@@ -2874,6 +2974,9 @@ function PanelEditor({
     setEditCandidate(null);
     setEditDoc(EMPTY_DOC);
     setEditMarker(null);
+    setEditChat([]);
+    setEditChatInput("");
+    setEditChatError("");
   };
 
   // Commits the edited candidate the same way a manual file upload would — it's just
@@ -3622,6 +3725,12 @@ function PanelEditor({
         busy={imageBusy}
         onKeepOriginal={discardEdit}
         onKeepEdited={useEditedVersion}
+        chat={editChat}
+        chatInput={editChatInput}
+        onChatInputChange={setEditChatInput}
+        onSendChat={sendEditChatMessage}
+        chatBusy={editChatBusy}
+        chatError={editChatError}
       />
     )}
 

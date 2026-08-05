@@ -1005,6 +1005,53 @@ button {
   text-align: center;
 }
 
+.edit-chat {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.edit-chat h4 {
+  margin: 0 0 8px;
+}
+
+.edit-chat-log {
+  max-height: 140px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.edit-chat-message {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.edit-chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.edit-chat-input {
+  flex: 1;
+  min-height: 46px;
+  max-height: 120px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+}
+
 .panel-editor-lower .primary {
   margin-bottom: 18px;
 }

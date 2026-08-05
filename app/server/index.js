@@ -820,11 +820,16 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;
-    const { instructions, sceneDoc, markerRect, poseSketch } = req.body;
+    const { instructions, sceneDoc, markerRect, poseSketch, baseImage } = req.body;
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
-    const currentImage = loadPanelImage(projectId, pageId, panel.id);
+    // baseImage (a data URL — see the "after edit chat" in App.jsx's sendEditChatMessage)
+    // is the CURRENT candidate, when refining one further — falls back to the panel's
+    // actual committed image for a fresh edit request. Either way this is just the image
+    // Codex edits; nothing here is written back to disk unless the result is later
+    // explicitly committed via the manual-image endpoint.
+    const currentImage = decodeDataUrl(baseImage) || loadPanelImage(projectId, pageId, panel.id);
     if (!currentImage) return res.status(400).json({ error: "panel has no image to edit" });
 
     const markedImage = isValidMarkerRect(markerRect) ? await drawMarkerRect(currentImage, markerRect) : null;
