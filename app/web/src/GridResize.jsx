@@ -15,6 +15,27 @@ export function parseGridAreas(areasStr) {
   return [...areasStr.matchAll(/"([^"]+)"/g)].map((m) => m[1].trim().split(/\s+/));
 }
 
+// A "regular" grid — every row has the same number of columns, and no panel spans more
+// than one cell (no label repeats) — is one where each row's column split can be made
+// fully independent of every other row's (see RegularGridResizeHandles below), because
+// nothing crosses a row boundary that would care. A layout with any spanning cell (a
+// tall left panel, a wide top banner, etc.) can't offer that: the spanning panel's own
+// width/height has to stay consistent across every row/column it crosses, so those keep
+// the original single shared-grid behavior (GridResizeHandles).
+export function isRegularGrid(grid) {
+  if (!grid.length) return false;
+  const cols = grid[0].length;
+  const seen = new Set();
+  for (const row of grid) {
+    if (row.length !== cols) return false;
+    for (const label of row) {
+      if (seen.has(label)) return false;
+      seen.add(label);
+    }
+  }
+  return true;
+}
+
 function parseFr(str) {
   return str
     .trim()
@@ -217,6 +238,148 @@ export default function GridResizeHandles({ containerRef, columns, rows, areas, 
           );
         })
       )}
+    </>
+  );
+}
+
+// Same seam-dragging idea as GridResizeHandles above, but for a "regular" grid (see
+// isRegularGrid) rendered as nested per-row grids (see PageCanvas) instead of one shared
+// grid — each row's own column split is independent, so dragging a vertical seam in one
+// row can never move a panel in any other row. Row HEIGHTS stay shared across the full
+// width either way (dragging a horizontal seam still resizes the whole row, same as
+// before) — only column widths become row-local. `columns` is an array of per-row
+// column-track strings (one per row, matching `rows`' track count).
+export function RegularGridResizeHandles({ containerRef, columns, rows, onLiveChange, onCommit }) {
+  const [box, setBox] = useState(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const cs = getComputedStyle(el);
+      setBox({
+        width: el.clientWidth,
+        height: el.clientHeight,
+        padLeft: parseFloat(cs.paddingLeft) || 0,
+        padTop: parseFloat(cs.paddingTop) || 0,
+        padRight: parseFloat(cs.paddingRight) || 0,
+        padBottom: parseFloat(cs.paddingBottom) || 0,
+        gapX: parseFloat(cs.columnGap) || 0,
+        gapY: parseFloat(cs.rowGap) || 0,
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef]);
+
+  if (!box) return null;
+
+  const rowFr = parseFr(rows);
+  const totalRowFr = rowFr.reduce((a, b) => a + b, 0);
+  const contentH = box.height - box.padTop - box.padBottom - (rowFr.length - 1) * box.gapY;
+  const fullRowContentW = box.width - box.padLeft - box.padRight;
+
+  const rowStartPx = [];
+  rowFr.forEach((_, i) => {
+    rowStartPx.push(i === 0 ? box.padTop : rowStartPx[i - 1] + (rowFr[i - 1] / totalRowFr) * contentH + box.gapY);
+  });
+  const rowEndPx = rowStartPx.map((start, i) => start + (rowFr[i] / totalRowFr) * contentH);
+
+  const pctX = (px) => (px / box.width) * 100;
+  const pctY = (px) => (px / box.height) * 100;
+
+  // Every row's own column boundaries, in pixels — independent of every other row's.
+  const rowColFr = columns.map((c) => parseFr(c));
+  const rowContentW = rowColFr.map((colFr) => fullRowContentW - (colFr.length - 1) * box.gapX);
+  const rowColStartPx = rowColFr.map((colFr, r) => {
+    const total = colFr.reduce((a, b) => a + b, 0);
+    const starts = [];
+    colFr.forEach((_, i) => {
+      starts.push(i === 0 ? box.padLeft : starts[i - 1] + (colFr[i - 1] / total) * rowContentW[r] + box.gapX);
+    });
+    return starts;
+  });
+  const rowColEndPx = rowColFr.map((colFr, r) => {
+    const total = colFr.reduce((a, b) => a + b, 0);
+    return rowColStartPx[r].map((start, i) => start + (colFr[i] / total) * rowContentW[r]);
+  });
+
+  const dragColumn = (r, c) => (e) => {
+    const startFr = parseFr(columns[r]);
+    const total = startFr.reduce((a, b) => a + b, 0);
+    const pxPerFr = rowContentW[r] / total;
+    const minFr = MIN_TRACK_PX / pxPerFr;
+    const startClientX = e.clientX;
+    let lastFr = startFr;
+    startDrag(
+      e,
+      (ev) => {
+        const dxFr = ((ev.clientX - startClientX) / rowContentW[r]) * total;
+        const clamped = Math.max(-(startFr[c] - minFr), Math.min(startFr[c + 1] - minFr, dxFr));
+        lastFr = [...startFr];
+        lastFr[c] = startFr[c] + clamped;
+        lastFr[c + 1] = startFr[c + 1] - clamped;
+        const next = [...columns];
+        next[r] = frString(lastFr);
+        onLiveChange({ gridColumns: next });
+      },
+      () => {
+        const next = [...columns];
+        next[r] = frString(lastFr);
+        onCommit({ gridColumns: next });
+      }
+    );
+  };
+
+  const dragRow = (index) => (e) => {
+    const startFr = parseFr(rows);
+    const total = startFr.reduce((a, b) => a + b, 0);
+    const pxPerFr = contentH / total;
+    const minFr = MIN_TRACK_PX / pxPerFr;
+    const startClientY = e.clientY;
+    let lastFr = startFr;
+    startDrag(
+      e,
+      (ev) => {
+        const dyFr = ((ev.clientY - startClientY) / contentH) * total;
+        const clamped = Math.max(-(startFr[index] - minFr), Math.min(startFr[index + 1] - minFr, dyFr));
+        lastFr = [...startFr];
+        lastFr[index] = startFr[index] + clamped;
+        lastFr[index + 1] = startFr[index + 1] - clamped;
+        onLiveChange({ gridRows: frString(lastFr) });
+      },
+      () => onCommit({ gridRows: frString(lastFr) })
+    );
+  };
+
+  return (
+    <>
+      {rowFr.map((_, r) =>
+        rowColFr[r].slice(0, -1).map((_, c) => {
+          const x = (rowColEndPx[r][c] + rowColStartPx[r][c + 1]) / 2;
+          return (
+            <div
+              key={`col-${r}-${c}`}
+              className="grid-resize-handle grid-resize-handle-col"
+              style={{ left: `${pctX(x)}%`, top: `${pctY(rowStartPx[r])}%`, height: `${pctY(rowEndPx[r] - rowStartPx[r])}%` }}
+              onPointerDown={dragColumn(r, c)}
+            />
+          );
+        })
+      )}
+      {rowFr.slice(0, -1).map((_, r) => {
+        const y = (rowEndPx[r] + rowStartPx[r + 1]) / 2;
+        return (
+          <div
+            key={`row-${r}`}
+            className="grid-resize-handle grid-resize-handle-row"
+            style={{ top: `${pctY(y)}%`, left: `${pctX(box.padLeft)}%`, width: `${pctX(fullRowContentW)}%` }}
+            onPointerDown={dragRow(r)}
+          />
+        );
+      })}
     </>
   );
 }

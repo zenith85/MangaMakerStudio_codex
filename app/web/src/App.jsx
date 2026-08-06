@@ -34,7 +34,7 @@ import ExpressionMark, {
   MAX_LINE_COUNT,
 } from "./ExpressionMark";
 import ExpressionPicker from "./ExpressionPicker";
-import GridResizeHandles from "./GridResize";
+import GridResizeHandles, { RegularGridResizeHandles, parseGridAreas, isRegularGrid } from "./GridResize";
 
 // Manga panel layout templates. Panels are assigned grid-area "p1", "p2", ...
 // in order, so a layout's look comes entirely from its grid-template — no
@@ -2098,53 +2098,97 @@ function PageCanvas({
 }) {
   const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
   const isFreeform = !!template.panels;
+  // A "regular" grid (every row the same column count, no panel spans a cell — see
+  // isRegularGrid) renders as nested per-row grids instead of one shared grid, so each
+  // row's column split is independent — dragging a vertical seam in one row can never
+  // move a panel in another row (see RegularGridResizeHandles). A layout with any
+  // spanning cell (a tall left panel, a wide top banner, etc.) can't offer that — the
+  // spanning panel's width/height has to stay consistent across everything it crosses —
+  // so those keep the original single-shared-grid behavior, unchanged.
+  const grid = isFreeform ? null : parseGridAreas(template.areas);
+  const regular = !isFreeform && isRegularGrid(grid);
   // A page can override its layout template's default track sizes by dragging the seams
-  // between panels (see GridResizeHandles) — cleared server-side whenever the layout
-  // itself changes, since a different template's grid-area structure makes an old
-  // override meaningless.
-  const columns = page.gridColumns || template.columns;
+  // between panels — cleared server-side whenever the layout itself changes, since a
+  // different template's grid-area structure makes an old override meaningless.
   const rows = page.gridRows || template.rows;
+  const columns = page.gridColumns || template.columns; // flat string — only the irregular branch below reads this
+  // Per-row column-track array — page.gridColumns is already in this shape once any row
+  // has been hand-resized; otherwise expand the flat override (or the template default)
+  // into one copy per row, which is exactly what every row was already showing.
+  const regularColumns = regular
+    ? Array.isArray(page.gridColumns)
+      ? page.gridColumns
+      : grid.map(() => page.gridColumns || template.columns)
+    : null;
+
+  const renderPanel = (panel, slotStyle, clipPath) => (
+    <PanelThumb
+      key={panel.id}
+      panel={panel}
+      selected={panel.id === selectedPanelId}
+      slotStyle={slotStyle}
+      clipPath={clipPath}
+      onSelect={onSelect}
+      onDragImage={onDragImage}
+      onDragImageEnd={onDragImageEnd}
+      customFonts={customFonts}
+      lang={lang}
+      onBubblesLive={onBubblesLive}
+      onBubblesCommit={onBubblesCommit}
+      onExpressionsLive={onExpressionsLive}
+      onExpressionsCommit={onExpressionsCommit}
+    />
+  );
 
   return (
     <div
       ref={containerRef}
       className="page-canvas"
-      style={isFreeform ? undefined : { gridTemplateAreas: template.areas, gridTemplateColumns: columns, gridTemplateRows: rows }}
+      style={
+        isFreeform
+          ? undefined
+          : regular
+          ? { gridTemplateColumns: "1fr", gridTemplateRows: rows }
+          : { gridTemplateAreas: template.areas, gridTemplateColumns: columns, gridTemplateRows: rows }
+      }
     >
-      {page.panels.map((panel, i) => {
-        const slot = isFreeform ? template.panels[i] : null;
-        const slotStyle = isFreeform
-          ? { position: "absolute", left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%` }
-          : { gridArea: `p${i + 1}` };
-        return (
-          <PanelThumb
-            key={panel.id}
-            panel={panel}
-            selected={panel.id === selectedPanelId}
-            slotStyle={slotStyle}
-            clipPath={slot?.clipPath}
-            onSelect={onSelect}
-            onDragImage={onDragImage}
-            onDragImageEnd={onDragImageEnd}
-            customFonts={customFonts}
-            lang={lang}
-            onBubblesLive={onBubblesLive}
-            onBubblesCommit={onBubblesCommit}
-            onExpressionsLive={onExpressionsLive}
-            onExpressionsCommit={onExpressionsCommit}
+      {isFreeform &&
+        page.panels.map((panel, i) => {
+          const slot = template.panels[i];
+          const slotStyle = { position: "absolute", left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%` };
+          return renderPanel(panel, slotStyle, slot.clipPath);
+        })}
+
+      {regular &&
+        grid.map((rowLabels, r) => (
+          <div key={r} className="page-canvas-row" style={{ gridTemplateColumns: regularColumns[r] }}>
+            {rowLabels.map((label) => renderPanel(page.panels[parseInt(label.slice(1), 10) - 1], undefined, undefined))}
+          </div>
+        ))}
+
+      {!isFreeform &&
+        !regular &&
+        page.panels.map((panel, i) => renderPanel(panel, { gridArea: `p${i + 1}` }, undefined))}
+
+      {!isFreeform &&
+        (regular ? (
+          <RegularGridResizeHandles
+            containerRef={containerRef}
+            columns={regularColumns}
+            rows={rows}
+            onLiveChange={onGridLive}
+            onCommit={onGridCommit}
           />
-        );
-      })}
-      {!isFreeform && (
-        <GridResizeHandles
-          containerRef={containerRef}
-          columns={columns}
-          rows={rows}
-          areas={template.areas}
-          onLiveChange={onGridLive}
-          onCommit={onGridCommit}
-        />
-      )}
+        ) : (
+          <GridResizeHandles
+            containerRef={containerRef}
+            columns={columns}
+            rows={rows}
+            areas={template.areas}
+            onLiveChange={onGridLive}
+            onCommit={onGridCommit}
+          />
+        ))}
 
       {/* Rendered AFTER the grid panels above (not interleaved with them) — floats over
           the whole layout rather than occupying a grid-area/freeform slot of its own,

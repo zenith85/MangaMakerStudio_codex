@@ -653,6 +653,16 @@ button {
   border-radius: 4px;
 }
 
+/* One row of a "regular" grid layout (see isRegularGrid/RegularGridResizeHandles) — its
+   own independent column split, nested inside .page-canvas's single outer column so
+   dragging a vertical seam here can never affect any other row. */
+.page-canvas-row {
+  display: grid;
+  column-gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* One of these sits over each seam between adjacent panels (see GridResizeHandles) — a
    thin invisible hit strip, highlighted only on hover/drag so the page stays clean by
    default but the resize affordance is discoverable by mousing over a panel edge. */
