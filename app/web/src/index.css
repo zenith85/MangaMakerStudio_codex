@@ -149,7 +149,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 30; /* above the terminal panel (19) — modals must stay clickable while it's open */
+  z-index: 30; /* below the terminal panel (40) — you must always be able to reach the AI chat, even with a dialog open */
 }
 
 .modal {
@@ -954,6 +954,16 @@ button {
   margin-top: 14px;
 }
 
+/* Once a chat refinement exists, a third "After edit chat" column joins Before/After —
+   narrower image height than the 2-up layout so 3 side by side don't get cramped. */
+.edit-compare-grid-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.edit-compare-grid-3 .edit-compare-option img {
+  height: 40vh;
+}
+
 /* Each option IS a button — clicking the image itself is the decision, not a separate
    "keep this one" control underneath it — so the button reset here undoes all of a
    plain <button>'s own styling in favor of just framing the image. */
@@ -1039,8 +1049,19 @@ button {
   align-items: flex-start;
 }
 
+/* button.primary defaults to width: 100% (a full-width standalone CTA everywhere else
+   it's used) — fights this flex row otherwise, ballooning to fill it and squeezing the
+   textarea down to a sliver. */
+.edit-chat-input-row button.primary {
+  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  align-self: stretch;
+}
+
 .edit-chat-input {
   flex: 1;
+  min-width: 0;
   min-height: 46px;
   max-height: 120px;
   resize: vertical;
@@ -1828,7 +1849,7 @@ button.primary:disabled {
   position: fixed;
   bottom: 12px;
   right: 12px;
-  z-index: 20;
+  z-index: 40; /* above .modal-backdrop (30) — must stay reachable to chat with the AI even with a dialog open */
   background: #4a5cff;
   color: white;
   border: none;
@@ -1837,8 +1858,8 @@ button.primary:disabled {
   font-size: 13px;
 }
 
-/* Floating window — sits above the app's own content but below .modal-backdrop (30),
-   so a confirmation dialog can never end up hidden behind it. */
+/* Floating window — sits above EVERYTHING else, including .modal-backdrop (30), so the
+   AI chat is always reachable no matter what dialog happens to be open. */
 .terminal-window {
   position: fixed;
   display: flex;
@@ -1847,7 +1868,7 @@ button.primary:disabled {
   border: 1px solid #2a2b33;
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  z-index: 29;
+  z-index: 40;
   overflow: hidden;
 }
 

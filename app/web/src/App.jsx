@@ -2599,9 +2599,11 @@ function PanelThumb({
 function EditCompareModal({
   beforeUrl,
   afterUrl,
+  chatUrl,
   busy,
   onKeepOriginal,
   onKeepEdited,
+  onKeepChatEdited,
   chat,
   chatInput,
   onChatInputChange,
@@ -2613,8 +2615,10 @@ function EditCompareModal({
     <div className="modal-backdrop">
       <div className="modal edit-compare-modal">
         <h2>Choose a version</h2>
-        <p className="scene-editor-hint">Click the image you want to keep, or refine the After below first.</p>
-        <div className="edit-compare-grid">
+        <p className="scene-editor-hint">
+          Click the image you want to keep{chatUrl ? "" : ", or refine the After below first"}.
+        </p>
+        <div className={`edit-compare-grid${chatUrl ? " edit-compare-grid-3" : ""}`}>
           <button type="button" className="edit-compare-option" onClick={onKeepOriginal} disabled={busy}>
             <span className="edit-compare-label">Before</span>
             <img src={beforeUrl} alt="Before edit" />
@@ -2623,6 +2627,12 @@ function EditCompareModal({
             <span className="edit-compare-label">After</span>
             <img src={afterUrl} alt="After edit" />
           </button>
+          {chatUrl && (
+            <button type="button" className="edit-compare-option" onClick={onKeepChatEdited} disabled={busy}>
+              <span className="edit-compare-label">After edit chat</span>
+              <img src={chatUrl} alt="After edit chat refinement" />
+            </button>
+          )}
         </div>
         {busy && <p className="empty-hint">Saving…</p>}
 
@@ -2775,12 +2785,14 @@ function PanelEditor({
   const [editDoc, setEditDoc] = useState(EMPTY_DOC);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
-  const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null
+  const [editCandidate, setEditCandidate] = useState(null); // { blob, url } | null — the ORIGINAL edit result
   // "After edit" chat — follow-up plain-text notes ("I don't like this", "add more X")
-  // that refine the CURRENT candidate further without closing the compare modal. Each
-  // message re-edits the latest candidate (not the original panel image), so it's a
-  // real chain of refinements. Reset whenever a fresh edit session starts (requestEdit)
-  // or ends (discardEdit).
+  // that refine the edit further without closing the compare modal, shown as a THIRD
+  // column (see EditCompareModal) alongside Before/After rather than replacing After —
+  // each message re-edits the latest chat candidate if there is one, else the original
+  // After (chaining refinements on refinements, not restarting from scratch every time).
+  // Reset whenever a fresh edit session starts (requestEdit) or ends (discardEdit).
+  const [editChatCandidate, setEditChatCandidate] = useState(null); // { blob, url } | null
   const [editChat, setEditChat] = useState([]); // [{ text }]
   const [editChatInput, setEditChatInput] = useState("");
   const [editChatBusy, setEditChatBusy] = useState(false);
@@ -2828,8 +2840,9 @@ function PanelEditor({
   useEffect(() => {
     return () => {
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
+      if (editChatCandidate) URL.revokeObjectURL(editChatCandidate.url);
     };
-  }, [editCandidate]);
+  }, [editCandidate, editChatCandidate]);
 
   const generate = async () => {
     setBusy(true);
@@ -2934,8 +2947,10 @@ function PanelEditor({
       const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarker, poseSketch);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
-      // A fresh edit request starts a new refinement session — any chat from a
-      // previous candidate no longer applies to this one.
+      // A fresh edit request starts a new refinement session — any chat candidate from
+      // a previous one no longer applies.
+      if (editChatCandidate) URL.revokeObjectURL(editChatCandidate.url);
+      setEditChatCandidate(null);
       setEditChat([]);
       setEditChatInput("");
       setEditChatError("");
@@ -2946,9 +2961,10 @@ function PanelEditor({
     }
   };
 
-  // A follow-up note on the CURRENT candidate ("I don't like this", "add more X") —
-  // re-edits that candidate itself (not the original panel image), so the compare
-  // modal can stay open through several rounds of back-and-forth before anything is
+  // A follow-up note ("I don't like this", "add more X") — re-edits the latest chat
+  // candidate if there is one already, else the original After, and shows the result as
+  // its own THIRD column (see EditCompareModal) rather than replacing After. Lets the
+  // compare modal stay open through several rounds of back-and-forth before anything is
   // actually committed or discarded.
   const sendEditChatMessage = async () => {
     const text = editChatInput.trim();
@@ -2956,10 +2972,10 @@ function PanelEditor({
     setEditChatBusy(true);
     setEditChatError("");
     try {
-      const baseImage = await blobToDataUrl(editCandidate.blob);
+      const baseImage = await blobToDataUrl((editChatCandidate || editCandidate).blob);
       const blob = await api.refinePanelEdit(projectId, page.id, panel.id, text, baseImage);
-      URL.revokeObjectURL(editCandidate.url);
-      setEditCandidate({ blob, url: URL.createObjectURL(blob) });
+      if (editChatCandidate) URL.revokeObjectURL(editChatCandidate.url);
+      setEditChatCandidate({ blob, url: URL.createObjectURL(blob) });
       setEditChat((prev) => [...prev, { text }]);
       setEditChatInput("");
     } catch (err) {
@@ -2971,7 +2987,9 @@ function PanelEditor({
 
   const discardEdit = () => {
     if (editCandidate) URL.revokeObjectURL(editCandidate.url);
+    if (editChatCandidate) URL.revokeObjectURL(editChatCandidate.url);
     setEditCandidate(null);
+    setEditChatCandidate(null);
     setEditDoc(EMPTY_DOC);
     setEditMarker(null);
     setEditChat([]);
@@ -2984,6 +3002,14 @@ function PanelEditor({
   const useEditedVersion = async () => {
     if (!editCandidate) return;
     await uploadImage(editCandidate.blob);
+    discardEdit();
+  };
+
+  // Same as useEditedVersion, but commits the chat-refined candidate instead of the
+  // original After.
+  const useEditChatVersion = async () => {
+    if (!editChatCandidate) return;
+    await uploadImage(editChatCandidate.blob);
     discardEdit();
   };
 
@@ -3722,9 +3748,11 @@ function PanelEditor({
       <EditCompareModal
         beforeUrl={panel.imageUrl}
         afterUrl={editCandidate.url}
+        chatUrl={editChatCandidate?.url}
         busy={imageBusy}
         onKeepOriginal={discardEdit}
         onKeepEdited={useEditedVersion}
+        onKeepChatEdited={useEditChatVersion}
         chat={editChat}
         chatInput={editChatInput}
         onChatInputChange={setEditChatInput}
