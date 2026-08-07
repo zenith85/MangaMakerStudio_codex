@@ -2849,6 +2849,7 @@ function PanelEditor({
   const editMarkerBoxRef = useRef(null);
   const editMarkerDragRef = useRef(null);
   const [showCopyFromPanel, setShowCopyFromPanel] = useState(false);
+  const [showChooseReference, setShowChooseReference] = useState(false);
   // A hand-drawn stick-figure pose guide — shared between Generate/Regenerate (Scene tab)
   // and Request edit (Edit image tab), since both just send it to Codex as an extra
   // reference image (see buildPrompt/buildEditPrompt's hasPoseSketch). Ephemeral: never
@@ -2925,6 +2926,21 @@ function PanelEditor({
     setImageError("");
     try {
       const blob = await fetch(sourcePanel.imageUrl).then((r) => r.blob());
+      await uploadImage(blob);
+    } catch (err) {
+      setImageError(err.message);
+      setImageBusy(false);
+    }
+  };
+
+  // Same idea as copyFromPanel above, but pulling from the project's Reference entities
+  // (the sidebar's "References" list) instead of another panel.
+  const chooseFromReference = async (reference) => {
+    setShowChooseReference(false);
+    setImageBusy(true);
+    setImageError("");
+    try {
+      const blob = await fetch(reference.imageUrl).then((r) => r.blob());
       await uploadImage(blob);
     } catch (err) {
       setImageError(err.message);
@@ -3325,6 +3341,31 @@ function PanelEditor({
                         <button key={p.id} className="copy-from-panel-option" onClick={() => copyFromPanel(p)}>
                           <img src={p.imageUrl} alt="" />
                           <span>{p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`}</span>
+                        </button>
+                      ))
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="copy-from-panel-wrap">
+              <button
+                className="panel-image-action-btn"
+                onClick={() => setShowChooseReference((v) => !v)}
+                disabled={imageBusy}
+              >
+                Choose from reference
+              </button>
+              {showChooseReference && (
+                <div className="copy-from-panel-popover">
+                  {references.filter((r) => r.hasImage).length === 0 ? (
+                    <p className="empty-hint">No references have an image yet.</p>
+                  ) : (
+                    references
+                      .filter((r) => r.hasImage)
+                      .map((r) => (
+                        <button key={r.id} className="copy-from-panel-option" onClick={() => chooseFromReference(r)}>
+                          <img src={r.imageUrl} alt="" />
+                          <span>{r.name}</span>
                         </button>
                       ))
                   )}
