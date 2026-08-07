@@ -641,11 +641,19 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             strokeDasharray={dashed ? "5 4" : undefined}
             style={{
               ...(isSharpCornered(bubble.shape) ? { strokeLinejoin: "miter" } : null),
+              ...(bubble.bgColor ? { fill: bubble.bgColor } : null),
               ...(noBackground ? { fill: "none", stroke: "none" } : null),
             }}
           />
           {dots.map((d, i) => (
-            <circle key={i} cx={d.x} cy={d.y} r={d.r} vectorEffect="non-scaling-stroke" />
+            <circle
+              key={i}
+              cx={d.x}
+              cy={d.y}
+              r={d.r}
+              vectorEffect="non-scaling-stroke"
+              style={bubble.bgColor ? { fill: bubble.bgColor } : undefined}
+            />
           ))}
           {archPoints.length > 0 && <polyline points={pointsToString(archPoints)} vectorEffect="non-scaling-stroke" />}
         </svg>

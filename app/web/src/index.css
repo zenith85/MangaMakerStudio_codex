@@ -1336,6 +1336,28 @@ button {
   cursor: pointer;
 }
 
+.bubble-list-color input[type="color"]:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.bubble-list-transparent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.panel-background-color {
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
+
+.bubble-list-transparent-toggle input {
+  width: 14px;
+  height: 14px;
+}
+
 .bubble-list-bold {
   display: flex;
   align-items: center;

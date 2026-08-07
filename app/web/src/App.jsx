@@ -492,7 +492,16 @@ function precropBubbleOutlines(container, page) {
     return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos };
   };
 
-  page.panels.forEach((panel, i) => {
+  // Grid/freeform panels render first, floating panels after (see PageCanvas) — the DOM's
+  // .panel-slot elements land in that same order, so pairing this combined array up
+  // positionally with panelSlots correctly reaches floating panels too. Only using
+  // page.panels here (as this used to) meant a floating panel's bubbles never got this
+  // treatment at all: their live SVGs still got hidden for capture (see the blanket
+  // .bubble-outline query below), but nothing was ever drawn to replace them, so they
+  // came out completely invisible in the exported PDF regardless of any bgColor chosen.
+  const allPanels = [...page.panels, ...(page.floatingPanels || [])];
+
+  allPanels.forEach((panel, i) => {
     const slot = panelSlots[i];
     if (!slot || !(panel.bubbles || []).length) return;
     const slotRect = slot.getBoundingClientRect();
@@ -522,8 +531,12 @@ function precropBubbleOutlines(container, page) {
         ctx.beginPath();
         outline.forEach((p, idx) => (idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
         ctx.closePath();
-        ctx.fillStyle = "white";
-        ctx.fill();
+        // Matches Bubble.jsx's live SVG: a custom bgColor wins, "transparent" skips the
+        // fill entirely (but the outline stroke below still draws), otherwise white.
+        if (bubble.bgColor !== "transparent") {
+          ctx.fillStyle = bubble.bgColor || "white";
+          ctx.fill();
+        }
         ctx.lineJoin = isSharpCornered(bubble.shape) ? "miter" : "round";
         ctx.setLineDash(isDashed(bubble.shape) ? [5, 4] : []);
         ctx.lineWidth = 2;
@@ -536,8 +549,10 @@ function precropBubbleOutlines(container, page) {
         const p = toScreen(d);
         ctx.beginPath();
         ctx.arc(p.x, p.y, d.r * avgScale, 0, Math.PI * 2);
-        ctx.fillStyle = "white";
-        ctx.fill();
+        if (bubble.bgColor !== "transparent") {
+          ctx.fillStyle = bubble.bgColor || "white";
+          ctx.fill();
+        }
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#1a1a1a";
         ctx.stroke();
@@ -2543,7 +2558,21 @@ function PanelThumb({
           unconditionally — for a diagonal panel that would opaquely cover whichever
           sibling panel shares this exact box, exactly the bug this rework fixes.
           Cleared so only the SVG polygon shape below is ever actually visible. */}
-      <div className="panel-slot-image-layer" style={clipPath ? { background: "transparent", border: "none" } : undefined}>
+      <div
+        className="panel-slot-image-layer"
+        style={
+          clipPath
+            ? { background: "transparent", border: "none" }
+            : panel.backgroundColor === "transparent"
+            ? // A "transparent" panel should disappear entirely, not just its fill — the
+              // default border/shadow (see .panel-slot.floating below) would otherwise
+              // still draw a visible outline around what's supposed to be invisible.
+              { background: "transparent", border: "none", boxShadow: "none" }
+            : panel.backgroundColor
+            ? { background: panel.backgroundColor }
+            : undefined
+        }
+      >
         {panel.hasImage ? (
           clipPath ? (
             svgImageHref && (
@@ -2988,6 +3017,14 @@ function PanelEditor({
     await onUpdated();
   };
 
+  // Floating panels sit on top of the page rather than in a grid slot with neighbors on
+  // every side, so a custom (or transparent) backdrop behind the image actually shows —
+  // see the panel-slot-image-layer style above, which reads this straight from the panel.
+  const setBackgroundColor = async (backgroundColor) => {
+    await api.updatePanel(projectId, page.id, panel.id, { backgroundColor });
+    await onUpdated();
+  };
+
   // Typed rotation isn't limited to 90° steps like the button above — normalized into
   // [0, 360) so e.g. -10 and 710 both land on the same, sensible 350°.
   const commitRotate = async (value) => {
@@ -3183,6 +3220,9 @@ function PanelEditor({
   const setBubbleTextColor = (bubbleId, textColor) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, textColor } : b)));
   };
+  const setBubbleBgColor = (bubbleId, bgColor) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, bgColor } : b)));
+  };
   const setBubbleRotate = (bubbleId, rotate) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, rotate } : b)));
   };
@@ -3373,6 +3413,26 @@ function PanelEditor({
               )}
             </div>
           </div>
+
+          {panel.floating && (
+            <label className="bubble-list-color panel-background-color">
+              Panel background
+              <input
+                type="color"
+                value={panel.backgroundColor && panel.backgroundColor !== "transparent" ? panel.backgroundColor : "#ffffff"}
+                disabled={panel.backgroundColor === "transparent"}
+                onChange={(e) => setBackgroundColor(e.target.value)}
+              />
+              <span className="bubble-list-transparent-toggle">
+                <input
+                  type="checkbox"
+                  checked={panel.backgroundColor === "transparent"}
+                  onChange={(e) => setBackgroundColor(e.target.checked ? "transparent" : undefined)}
+                />
+                Transparent
+              </span>
+            </label>
+          )}
 
           {panel.hasImage && (
             <div className="panel-image-transform">
@@ -3724,6 +3784,23 @@ function PanelEditor({
                     value={b.textColor || "#111111"}
                     onChange={(e) => setBubbleTextColor(b.id, e.target.value)}
                   />
+                </label>
+                <label className="bubble-list-color">
+                  Background
+                  <input
+                    type="color"
+                    value={b.bgColor && b.bgColor !== "transparent" ? b.bgColor : "#ffffff"}
+                    disabled={b.bgColor === "transparent"}
+                    onChange={(e) => setBubbleBgColor(b.id, e.target.value)}
+                  />
+                  <span className="bubble-list-transparent-toggle">
+                    <input
+                      type="checkbox"
+                      checked={b.bgColor === "transparent"}
+                      onChange={(e) => setBubbleBgColor(b.id, e.target.checked ? "transparent" : undefined)}
+                    />
+                    Transparent
+                  </span>
                 </label>
                 <label className="bubble-list-bold">
                   <input type="checkbox" checked={!!b.bold} onChange={(e) => setBubbleBold(b.id, e.target.checked)} />
