@@ -540,8 +540,11 @@ function precropBubbleOutlines(container, page) {
         ctx.lineJoin = isSharpCornered(bubble.shape) ? "miter" : "round";
         ctx.setLineDash(isDashed(bubble.shape) ? [5, 4] : []);
         ctx.lineWidth = 2;
-        ctx.strokeStyle = "#1a1a1a";
-        ctx.stroke();
+        // Same as bgColor above: a custom borderColor wins, "none" skips the stroke.
+        if (bubble.borderColor !== "none") {
+          ctx.strokeStyle = bubble.borderColor || "#1a1a1a";
+          ctx.stroke();
+        }
         ctx.restore();
       }
 
@@ -554,8 +557,10 @@ function precropBubbleOutlines(container, page) {
           ctx.fill();
         }
         ctx.lineWidth = 2;
-        ctx.strokeStyle = "#1a1a1a";
-        ctx.stroke();
+        if (bubble.borderColor !== "none") {
+          ctx.strokeStyle = bubble.borderColor || "#1a1a1a";
+          ctx.stroke();
+        }
       }
     }
   });
@@ -3009,6 +3014,16 @@ function PanelEditor({
     await onUpdated();
   };
 
+  // A resize/move can leave the old pan offset pointing at a spot that's no longer
+  // inside the frame at all — especially after zooming in a lot — so the image looks
+  // like it's just vanished. This snaps back to a known-good state (centered, no zoom)
+  // rather than trying to guess a "still valid" offset.
+  const centerImage = async () => {
+    await api.updatePanel(projectId, page.id, panel.id, { imageOffset: { x: 50, y: 50 }, imageScale: 1 });
+    setZoomDraft(null);
+    await onUpdated();
+  };
+
   // 100 = untouched. Generation sometimes comes out overexposed, so this exists purely
   // to dim/darken the result after the fact rather than needing to regenerate.
   const commitBrightness = async (value) => {
@@ -3217,11 +3232,20 @@ function PanelEditor({
   const setBubbleBold = (bubbleId, bold) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, bold } : b)));
   };
+  const setBubbleItalic = (bubbleId, italic) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, italic } : b)));
+  };
+  const setBubbleUnderline = (bubbleId, underline) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, underline } : b)));
+  };
   const setBubbleTextColor = (bubbleId, textColor) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, textColor } : b)));
   };
   const setBubbleBgColor = (bubbleId, bgColor) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, bgColor } : b)));
+  };
+  const setBubbleBorderColor = (bubbleId, borderColor) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, borderColor } : b)));
   };
   const setBubbleRotate = (bubbleId, rotate) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, rotate } : b)));
@@ -3355,20 +3379,15 @@ function PanelEditor({
               onClick={() => fileInputRef.current.click()}
               disabled={imageBusy}
             >
-              Choose file
+              File
             </button>
-            {panel.hasImage && (
-              <button className="panel-image-action-btn" onClick={openImageLocation}>
-                Open image location
-              </button>
-            )}
             <div className="copy-from-panel-wrap">
               <button
                 className="panel-image-action-btn"
                 onClick={() => setShowCopyFromPanel((v) => !v)}
                 disabled={imageBusy}
               >
-                Copy from panel
+                From panel
               </button>
               {showCopyFromPanel && (
                 <div className="copy-from-panel-popover">
@@ -3393,7 +3412,7 @@ function PanelEditor({
                 onClick={() => setShowChooseReference((v) => !v)}
                 disabled={imageBusy}
               >
-                Choose from reference
+                From reference
               </button>
               {showChooseReference && (
                 <div className="copy-from-panel-popover">
@@ -3412,6 +3431,20 @@ function PanelEditor({
                 </div>
               )}
             </div>
+            {panel.hasImage && (
+              <button className="panel-image-action-btn" onClick={openImageLocation}>
+                Browse
+              </button>
+            )}
+            {panel.hasImage && (
+              <button
+                className="panel-image-action-btn"
+                onClick={centerImage}
+                title="Reset the image's pan/zoom — fixes it disappearing after a resize or move"
+              >
+                🎯
+              </button>
+            )}
           </div>
 
           {panel.floating && (
@@ -3440,81 +3473,87 @@ function PanelEditor({
                 ⟳ Rotate 90°
               </button>
               <label className="panel-zoom-control">
-                Rotation
-                <input
-                  type="number"
-                  className="panel-number-input"
-                  step="1"
-                  value={rotateDraft ?? Math.round(panel.imageRotate || 0)}
-                  onChange={(e) => setRotateDraft(e.target.value)}
-                  onBlur={(e) => commitRotate(parseFloat(e.target.value) || 0)}
-                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
-                />
-                <span className="panel-zoom-value">°</span>
+                <span className="panel-zoom-label">Rotation</span>
+                <span className="panel-zoom-control-row">
+                  <input
+                    type="number"
+                    className="panel-number-input"
+                    step="1"
+                    value={rotateDraft ?? Math.round(panel.imageRotate || 0)}
+                    onChange={(e) => setRotateDraft(e.target.value)}
+                    onBlur={(e) => commitRotate(parseFloat(e.target.value) || 0)}
+                    onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                  />
+                  <span className="panel-zoom-value">°</span>
+                </span>
               </label>
               <label className="panel-zoom-control">
-                Zoom
-                <input
-                  type="range"
-                  min="0.2"
-                  max="4"
-                  step="0.01"
-                  value={zoomDraft ?? (panel.imageScale || 1)}
-                  onChange={(e) => {
-                    setZoomDraft(e.target.value);
-                    onLiveUpdate(panel.id, { imageScale: parseFloat(e.target.value) });
-                  }}
-                  onMouseUp={(e) => commitZoom(parseFloat(e.target.value))}
-                  onTouchEnd={(e) => commitZoom(parseFloat(e.target.value))}
-                />
-                <input
-                  type="number"
-                  className="panel-number-input"
-                  min="0.2"
-                  max="4"
-                  step="0.01"
-                  value={zoomDraft ?? (panel.imageScale || 1)}
-                  onChange={(e) => {
-                    setZoomDraft(e.target.value);
-                    const v = parseFloat(e.target.value);
-                    if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageScale: v });
-                  }}
-                  onBlur={(e) => commitZoom(clamp(parseFloat(e.target.value) || 1, 0.2, 4))}
-                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
-                />
-                <span className="panel-zoom-value">×</span>
+                <span className="panel-zoom-label">Zoom</span>
+                <span className="panel-zoom-control-row">
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="4"
+                    step="0.01"
+                    value={zoomDraft ?? (panel.imageScale || 1)}
+                    onChange={(e) => {
+                      setZoomDraft(e.target.value);
+                      onLiveUpdate(panel.id, { imageScale: parseFloat(e.target.value) });
+                    }}
+                    onMouseUp={(e) => commitZoom(parseFloat(e.target.value))}
+                    onTouchEnd={(e) => commitZoom(parseFloat(e.target.value))}
+                  />
+                  <input
+                    type="number"
+                    className="panel-number-input"
+                    min="0.2"
+                    max="4"
+                    step="0.01"
+                    value={zoomDraft ?? (panel.imageScale || 1)}
+                    onChange={(e) => {
+                      setZoomDraft(e.target.value);
+                      const v = parseFloat(e.target.value);
+                      if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageScale: v });
+                    }}
+                    onBlur={(e) => commitZoom(clamp(parseFloat(e.target.value) || 1, 0.2, 4))}
+                    onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                  />
+                  <span className="panel-zoom-value">×</span>
+                </span>
               </label>
               <label className="panel-zoom-control">
-                Brightness
-                <input
-                  type="range"
-                  min="40"
-                  max="160"
-                  step="1"
-                  value={brightnessDraft ?? (panel.imageBrightness ?? 100)}
-                  onChange={(e) => {
-                    setBrightnessDraft(e.target.value);
-                    onLiveUpdate(panel.id, { imageBrightness: parseFloat(e.target.value) });
-                  }}
-                  onMouseUp={(e) => commitBrightness(parseFloat(e.target.value))}
-                  onTouchEnd={(e) => commitBrightness(parseFloat(e.target.value))}
-                />
-                <input
-                  type="number"
-                  className="panel-number-input"
-                  min="40"
-                  max="160"
-                  step="1"
-                  value={brightnessDraft ?? (panel.imageBrightness ?? 100)}
-                  onChange={(e) => {
-                    setBrightnessDraft(e.target.value);
-                    const v = parseFloat(e.target.value);
-                    if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageBrightness: v });
-                  }}
-                  onBlur={(e) => commitBrightness(clamp(parseFloat(e.target.value) || 100, 40, 160))}
-                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
-                />
-                <span className="panel-zoom-value">%</span>
+                <span className="panel-zoom-label">Brightness</span>
+                <span className="panel-zoom-control-row">
+                  <input
+                    type="range"
+                    min="40"
+                    max="160"
+                    step="1"
+                    value={brightnessDraft ?? (panel.imageBrightness ?? 100)}
+                    onChange={(e) => {
+                      setBrightnessDraft(e.target.value);
+                      onLiveUpdate(panel.id, { imageBrightness: parseFloat(e.target.value) });
+                    }}
+                    onMouseUp={(e) => commitBrightness(parseFloat(e.target.value))}
+                    onTouchEnd={(e) => commitBrightness(parseFloat(e.target.value))}
+                  />
+                  <input
+                    type="number"
+                    className="panel-number-input"
+                    min="40"
+                    max="160"
+                    step="1"
+                    value={brightnessDraft ?? (panel.imageBrightness ?? 100)}
+                    onChange={(e) => {
+                      setBrightnessDraft(e.target.value);
+                      const v = parseFloat(e.target.value);
+                      if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageBrightness: v });
+                    }}
+                    onBlur={(e) => commitBrightness(clamp(parseFloat(e.target.value) || 100, 40, 160))}
+                    onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                  />
+                  <span className="panel-zoom-value">%</span>
+                </span>
               </label>
             </div>
           )}
@@ -3522,43 +3561,47 @@ function PanelEditor({
           {panel.hasImage && (
             <div className="panel-screentone">
               <label className="panel-zoom-control">
-                Filter
-                <select
-                  className="bubble-list-font"
-                  value={filterType}
-                  onChange={(e) => onChangeFilterType(e.target.value)}
-                >
-                  {FILTER_TYPES.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
+                <span className="panel-zoom-label">Filter</span>
+                <span className="panel-zoom-control-row">
+                  <select
+                    className="bubble-list-font"
+                    value={filterType}
+                    onChange={(e) => onChangeFilterType(e.target.value)}
+                  >
+                    {FILTER_TYPES.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </span>
               </label>
               <label className="panel-zoom-control">
-                {filterParamMeta(filterType).label}
-                <input
-                  type="range"
-                  min={filterParamMeta(filterType).min}
-                  max={filterParamMeta(filterType).max}
-                  step={filterParamMeta(filterType).step}
-                  value={filterParamValue}
-                  onChange={(e) => setFilterParamValue(parseFloat(e.target.value))}
-                />
-                <input
-                  type="number"
-                  className="panel-number-input"
-                  min={filterParamMeta(filterType).min}
-                  max={filterParamMeta(filterType).max}
-                  step={filterParamMeta(filterType).step}
-                  value={filterParamValue}
-                  onChange={(e) => {
-                    const meta = filterParamMeta(filterType);
-                    setFilterParamValue(clamp(parseFloat(e.target.value) || meta.default, meta.min, meta.max));
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
-                />
-                <span className="panel-zoom-value">{filterParamMeta(filterType).unit}</span>
+                <span className="panel-zoom-label">{filterParamMeta(filterType).label}</span>
+                <span className="panel-zoom-control-row">
+                  <input
+                    type="range"
+                    min={filterParamMeta(filterType).min}
+                    max={filterParamMeta(filterType).max}
+                    step={filterParamMeta(filterType).step}
+                    value={filterParamValue}
+                    onChange={(e) => setFilterParamValue(parseFloat(e.target.value))}
+                  />
+                  <input
+                    type="number"
+                    className="panel-number-input"
+                    min={filterParamMeta(filterType).min}
+                    max={filterParamMeta(filterType).max}
+                    step={filterParamMeta(filterType).step}
+                    value={filterParamValue}
+                    onChange={(e) => {
+                      const meta = filterParamMeta(filterType);
+                      setFilterParamValue(clamp(parseFloat(e.target.value) || meta.default, meta.min, meta.max));
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                  />
+                  <span className="panel-zoom-value">{filterParamMeta(filterType).unit}</span>
+                </span>
               </label>
               <button className="panel-image-action-btn" onClick={applyFilter} disabled={filterBusy}>
                 {filterBusy ? "Applying filter…" : panel.hasFilter ? "Re-apply filter" : "Apply filter"}
@@ -3767,6 +3810,32 @@ function PanelEditor({
                     onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 120))}
                   />
                 </label>
+                <div className="bubble-format-toggles">
+                  <button
+                    type="button"
+                    className={`bubble-format-btn${b.bold ? " active" : ""}`}
+                    onClick={() => setBubbleBold(b.id, !b.bold)}
+                    title="Bold"
+                  >
+                    <strong>B</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={`bubble-format-btn${b.italic ? " active" : ""}`}
+                    onClick={() => setBubbleItalic(b.id, !b.italic)}
+                    title="Italic"
+                  >
+                    <em>I</em>
+                  </button>
+                  <button
+                    type="button"
+                    className={`bubble-format-btn${b.underline ? " active" : ""}`}
+                    onClick={() => setBubbleUnderline(b.id, !b.underline)}
+                    title="Underline"
+                  >
+                    <span style={{ textDecoration: "underline" }}>U</span>
+                  </button>
+                </div>
                 <label className="bubble-list-font-size">
                   Rotation
                   <input
@@ -3802,9 +3871,22 @@ function PanelEditor({
                     Transparent
                   </span>
                 </label>
-                <label className="bubble-list-bold">
-                  <input type="checkbox" checked={!!b.bold} onChange={(e) => setBubbleBold(b.id, e.target.checked)} />
-                  Bold
+                <label className="bubble-list-color">
+                  Border
+                  <input
+                    type="color"
+                    value={b.borderColor && b.borderColor !== "none" ? b.borderColor : "#1a1a1a"}
+                    disabled={b.borderColor === "none"}
+                    onChange={(e) => setBubbleBorderColor(b.id, e.target.value)}
+                  />
+                  <span className="bubble-list-transparent-toggle">
+                    <input
+                      type="checkbox"
+                      checked={b.borderColor === "none"}
+                      onChange={(e) => setBubbleBorderColor(b.id, e.target.checked ? "none" : undefined)}
+                    />
+                    No border
+                  </span>
                 </label>
               </div>
             ))}

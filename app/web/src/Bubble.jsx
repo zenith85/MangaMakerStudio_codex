@@ -601,6 +601,9 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
   const archPoints = tailStyle === "arch" ? archTailPoints(boundary, bubble) : [];
   const dashed = isDashed(bubble.shape);
   const noBackground = hasNoBackground(bubble.shape);
+  // "none" removes the border entirely (still overridden by noBackground below, which
+  // never has one regardless); a custom color otherwise wins over the CSS default.
+  const borderStyle = bubble.borderColor === "none" ? { stroke: "none" } : bubble.borderColor ? { stroke: bubble.borderColor } : null;
   // font-weight: bold only has something to switch to on fonts that actually ship a bold
   // face (Comic Neue does; Bangers/Permanent Marker/Shojumaru/Reggae One are single-weight
   // display fonts with no bold variant to synthesize, so the browser renders them
@@ -642,6 +645,7 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             style={{
               ...(isSharpCornered(bubble.shape) ? { strokeLinejoin: "miter" } : null),
               ...(bubble.bgColor ? { fill: bubble.bgColor } : null),
+              ...borderStyle,
               ...(noBackground ? { fill: "none", stroke: "none" } : null),
             }}
           />
@@ -652,10 +656,12 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
               cy={d.y}
               r={d.r}
               vectorEffect="non-scaling-stroke"
-              style={bubble.bgColor ? { fill: bubble.bgColor } : undefined}
+              style={{ ...(bubble.bgColor ? { fill: bubble.bgColor } : null), ...borderStyle }}
             />
           ))}
-          {archPoints.length > 0 && <polyline points={pointsToString(archPoints)} vectorEffect="non-scaling-stroke" />}
+          {archPoints.length > 0 && (
+            <polyline points={pointsToString(archPoints)} vectorEffect="non-scaling-stroke" style={borderStyle || undefined} />
+          )}
         </svg>
 
         <div className="bubble-text-clip" style={{ clipPath: pointsToClipPath(boundary) }}>
@@ -666,6 +672,8 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontFamily: fontFamilyFor(bubble.font, customFonts),
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
+                fontStyle: bubble.italic ? "italic" : undefined,
+                textDecoration: bubble.underline ? "underline" : undefined,
                 color: bubble.textColor || undefined,
                 WebkitTextStroke: boldStroke,
                 direction: lang === "ar" ? "rtl" : undefined,
@@ -686,6 +694,8 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
                 fontFamily: fontFamilyFor(bubble.font, customFonts),
                 fontSize: `${bubble.fontSize || DEFAULT_FONT_SIZE}px`,
                 fontWeight: bubble.bold ? "bold" : undefined,
+                fontStyle: bubble.italic ? "italic" : undefined,
+                textDecoration: bubble.underline ? "underline" : undefined,
                 color: bubble.textColor || undefined,
                 WebkitTextStroke: boldStroke,
                 direction: lang === "ar" ? "rtl" : undefined,

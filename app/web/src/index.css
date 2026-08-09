@@ -1372,6 +1372,36 @@ button {
   accent-color: #4a5cff;
 }
 
+.bubble-format-toggles {
+  display: flex;
+  gap: 6px;
+}
+
+.bubble-format-btn {
+  width: 32px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.bubble-format-btn:hover {
+  border-color: #4a5cff;
+  color: var(--text-primary);
+}
+
+.bubble-format-btn.active {
+  background: #4a5cff;
+  border-color: #4a5cff;
+  color: white;
+}
+
 .bubble-list-thickness {
   display: flex;
   flex-direction: column;
@@ -1800,40 +1830,60 @@ button.primary:disabled {
   flex-wrap: wrap;
 }
 
-.panel-image-transform {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-
+/* Each control (Rotation/Zoom/Brightness, Filter/its param) is now a full-width row of
+   its own (see .panel-zoom-control below) rather than inline chips that wrap unevenly
+   depending on how long each one's label happens to be — that's what made these look
+   misaligned before. The Rotate/Apply buttons stay their own natural (compact) size. */
+.panel-image-transform,
 .panel-screentone {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
   margin-top: 10px;
 }
 
+/* Label on its own line, control(s) on a full-width line below — so a slider's actual
+   track always starts at the same x position regardless of whether the label above it
+   reads "Zoom" or "Line spacing". */
 .panel-zoom-control {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
   font-size: 13px;
   color: var(--text-muted);
 }
 
-.panel-zoom-control input[type="range"] {
-  width: 120px;
+.panel-zoom-label {
+  font-size: 12px;
+}
+
+.panel-zoom-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.panel-zoom-control-row input[type="range"],
+.panel-zoom-control-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .panel-zoom-value {
   color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .panel-number-input {
+  /* .panel-editor input's width: 100% (higher specificity) would otherwise win over the
+     plain width above — flex-basis takes priority over width for a flex item regardless
+     of specificity, so pinning it here is what actually keeps this a small fixed-size
+     number box instead of ballooning to fill the row. */
   width: 56px;
+  flex: 0 0 56px;
 }
 
 /* Same look as .open-folder-button — the sidebar's established secondary-action style —
