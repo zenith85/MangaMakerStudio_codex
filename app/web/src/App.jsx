@@ -2463,10 +2463,16 @@ function PanelThumb({
     const startClientX = e.clientX;
     const startClientY = e.clientY;
     let lastPatch = {};
+    // Capping at 100 - panel.x/y (room left to the page edge from wherever the panel
+    // happens to be anchored) meant resizing just stopped dead the moment the panel's
+    // far edge reached the page boundary, regardless of how much further you dragged —
+    // that's the "stops at a certain height" bug. A floating panel is an overlay, not
+    // bound to the page grid, so there's no real reason it can't extend past the edge
+    // (bleed) — just keep it from growing absurdly large.
     const onMove = (ev) => {
       const dwPct = ((ev.clientX - startClientX) / rect.width) * 100;
       const dhPct = ((ev.clientY - startClientY) / rect.height) * 100;
-      lastPatch = { width: clamp(startW + dwPct, 10, 100 - panel.x), height: clamp(startH + dhPct, 10, 100 - panel.y) };
+      lastPatch = { width: clamp(startW + dwPct, 1, 300), height: clamp(startH + dhPct, 1, 300) };
       onFloatingLive(panel.id, lastPatch);
     };
     const onUp = () => {
@@ -3800,15 +3806,24 @@ function PanelEditor({
                     }}
                   />
                 </label>
-                <label className="bubble-list-font-size">
+                <label className="bubble-list-thickness">
                   Font size
-                  <input
-                    type="number"
-                    min="6"
-                    max="120"
-                    value={b.fontSize || DEFAULT_FONT_SIZE}
-                    onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 120))}
-                  />
+                  <div className="bubble-list-thickness-controls">
+                    <input
+                      type="range"
+                      min="6"
+                      max="120"
+                      value={b.fontSize || DEFAULT_FONT_SIZE}
+                      onChange={(e) => setBubbleFontSize(b.id, parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE)}
+                    />
+                    <input
+                      type="number"
+                      min="6"
+                      max="120"
+                      value={b.fontSize || DEFAULT_FONT_SIZE}
+                      onChange={(e) => setBubbleFontSize(b.id, clamp(parseInt(e.target.value, 10) || DEFAULT_FONT_SIZE, 6, 120))}
+                    />
+                  </div>
                 </label>
                 <div className="bubble-format-toggles">
                   <button
@@ -3836,57 +3851,65 @@ function PanelEditor({
                     <span style={{ textDecoration: "underline" }}>U</span>
                   </button>
                 </div>
-                <label className="bubble-list-font-size">
+                <label className="bubble-list-thickness">
                   Rotation
-                  <input
-                    type="number"
-                    min="-180"
-                    max="180"
-                    value={normalizeSignedDegrees(b.rotate || 0)}
-                    onChange={(e) => setBubbleRotate(b.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
-                  />
+                  <div className="bubble-list-thickness-controls">
+                    <input
+                      type="number"
+                      min="-180"
+                      max="180"
+                      value={normalizeSignedDegrees(b.rotate || 0)}
+                      onChange={(e) => setBubbleRotate(b.id, clamp(parseInt(e.target.value, 10) || 0, -180, 180))}
+                    />
+                  </div>
                 </label>
-                <label className="bubble-list-color">
+                <label className="bubble-list-thickness">
                   Text color
-                  <input
-                    type="color"
-                    value={b.textColor || "#111111"}
-                    onChange={(e) => setBubbleTextColor(b.id, e.target.value)}
-                  />
+                  <div className="bubble-list-thickness-controls">
+                    <input
+                      type="color"
+                      value={b.textColor || "#111111"}
+                      onChange={(e) => setBubbleTextColor(b.id, e.target.value)}
+                    />
+                  </div>
                 </label>
-                <label className="bubble-list-color">
+                <label className="bubble-list-thickness">
                   Background
-                  <input
-                    type="color"
-                    value={b.bgColor && b.bgColor !== "transparent" ? b.bgColor : "#ffffff"}
-                    disabled={b.bgColor === "transparent"}
-                    onChange={(e) => setBubbleBgColor(b.id, e.target.value)}
-                  />
-                  <span className="bubble-list-transparent-toggle">
+                  <div className="bubble-list-thickness-controls">
                     <input
-                      type="checkbox"
-                      checked={b.bgColor === "transparent"}
-                      onChange={(e) => setBubbleBgColor(b.id, e.target.checked ? "transparent" : undefined)}
+                      type="color"
+                      value={b.bgColor && b.bgColor !== "transparent" ? b.bgColor : "#ffffff"}
+                      disabled={b.bgColor === "transparent"}
+                      onChange={(e) => setBubbleBgColor(b.id, e.target.value)}
                     />
-                    Transparent
-                  </span>
+                    <span className="bubble-list-transparent-toggle">
+                      <input
+                        type="checkbox"
+                        checked={b.bgColor === "transparent"}
+                        onChange={(e) => setBubbleBgColor(b.id, e.target.checked ? "transparent" : undefined)}
+                      />
+                      Transparent
+                    </span>
+                  </div>
                 </label>
-                <label className="bubble-list-color">
+                <label className="bubble-list-thickness">
                   Border
-                  <input
-                    type="color"
-                    value={b.borderColor && b.borderColor !== "none" ? b.borderColor : "#1a1a1a"}
-                    disabled={b.borderColor === "none"}
-                    onChange={(e) => setBubbleBorderColor(b.id, e.target.value)}
-                  />
-                  <span className="bubble-list-transparent-toggle">
+                  <div className="bubble-list-thickness-controls">
                     <input
-                      type="checkbox"
-                      checked={b.borderColor === "none"}
-                      onChange={(e) => setBubbleBorderColor(b.id, e.target.checked ? "none" : undefined)}
+                      type="color"
+                      value={b.borderColor && b.borderColor !== "none" ? b.borderColor : "#1a1a1a"}
+                      disabled={b.borderColor === "none"}
+                      onChange={(e) => setBubbleBorderColor(b.id, e.target.value)}
                     />
-                    No border
-                  </span>
+                    <span className="bubble-list-transparent-toggle">
+                      <input
+                        type="checkbox"
+                        checked={b.borderColor === "none"}
+                        onChange={(e) => setBubbleBorderColor(b.id, e.target.checked ? "none" : undefined)}
+                      />
+                      No border
+                    </span>
+                  </div>
                 </label>
               </div>
             ))}

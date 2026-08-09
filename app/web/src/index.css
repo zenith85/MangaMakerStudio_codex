@@ -1431,6 +1431,22 @@ button {
   padding: 6px 8px;
 }
 
+.bubble-list-thickness-controls input[type="color"] {
+  width: 32px;
+  height: 26px;
+  padding: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.bubble-list-thickness-controls input[type="color"]:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .bubble-list-row .delete {
   background: none;
   border: none;
