@@ -3499,7 +3499,7 @@ function PanelEditor({
                   <input
                     type="range"
                     min="0.2"
-                    max="4"
+                    max="10"
                     step="0.01"
                     value={zoomDraft ?? (panel.imageScale || 1)}
                     onChange={(e) => {
@@ -3513,7 +3513,7 @@ function PanelEditor({
                     type="number"
                     className="panel-number-input"
                     min="0.2"
-                    max="4"
+                    max="10"
                     step="0.01"
                     value={zoomDraft ?? (panel.imageScale || 1)}
                     onChange={(e) => {
@@ -3521,7 +3521,7 @@ function PanelEditor({
                       const v = parseFloat(e.target.value);
                       if (!Number.isNaN(v)) onLiveUpdate(panel.id, { imageScale: v });
                     }}
-                    onBlur={(e) => commitZoom(clamp(parseFloat(e.target.value) || 1, 0.2, 4))}
+                    onBlur={(e) => commitZoom(clamp(parseFloat(e.target.value) || 1, 0.2, 10))}
                     onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
                   />
                   <span className="panel-zoom-value">×</span>
