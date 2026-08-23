@@ -14,6 +14,7 @@ import Bubble, {
   tailStyleFor,
   outlineWithTail,
   dotTrailPoints,
+  archTailPoints,
   isDashed,
   isSharpCornered,
   hasNoBackground,
@@ -518,9 +519,12 @@ function precropBubbleOutlines(container, page) {
       const toScreen = (p) => rotatePoint({ x: bx + (p.x / 100) * bw, y: by + (p.y / 100) * bh }, center, rotate);
 
       const boundary = boundaryFor(bubble.shape);
-      const tailStyle = tailStyleFor(bubble.shape);
+      // bubble.tailStyle is a per-bubble override (see the "Arch" switch in
+      // ShapePicker) — matches the live SVG's own tailStyle logic exactly (Bubble.jsx).
+      const tailStyle = bubble.tailStyle === "arch" ? "arch" : tailStyleFor(bubble.shape);
       const outline = (tailStyle === "spike" ? outlineWithTail(boundary, bubble) : boundary).map(toScreen);
       const dots = tailStyle === "dots" ? dotTrailPoints(boundary, bubble) : [];
+      const archPts = tailStyle === "arch" ? archTailPoints(boundary, bubble).map(toScreen) : [];
       const avgScale = (bw + bh) / 2 / 100; // dot radii are in the same 0-100 local units as the boundary
 
       // Noise/SFX bubbles have no bubble fill or outline at all (see hasNoBackground in
@@ -561,6 +565,20 @@ function precropBubbleOutlines(container, page) {
           ctx.strokeStyle = bubble.borderColor || "#1a1a1a";
           ctx.stroke();
         }
+      }
+
+      if (archPts.length > 1) {
+        // Matches Bubble.jsx: bubble.archColor (black or white) picks the connector's
+        // own color, independent of the main outline's borderColor.
+        ctx.save();
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = bubble.archColor === "white" ? "#ffffff" : "#1a1a1a";
+        ctx.beginPath();
+        archPts.forEach((p, idx) => (idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.stroke();
+        ctx.restore();
       }
     }
   });
@@ -2670,6 +2688,39 @@ function PanelThumb({
   );
 }
 
+// A grid of big, easy-to-scan thumbnails to pick an image from (another panel, or a
+// Reference entity) — replaces a small anchored dropdown list, which stopped being
+// practical once a project has enough panels/references that the options no longer fit
+// in a short list. Backdrop click or the Close button dismiss it without picking
+// anything; picking an option is expected to close it itself (see copyFromPanel/
+// chooseFromReference in PanelEditor, which already do).
+function ChooseImageModal({ title, emptyHint, items, onPick, onClose }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal choose-image-modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{title}</h2>
+        {items.length === 0 ? (
+          <p className="empty-hint">{emptyHint}</p>
+        ) : (
+          <div className="choose-image-grid">
+            {items.map(({ key, imageUrl, label, value }) => (
+              <button key={key} type="button" className="choose-image-option" onClick={() => onPick(value)}>
+                <img src={imageUrl} alt="" />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Pops up once a requested edit comes back — big before/after images instead of the
 // small inline thumbnails this replaced, since a tiny side-by-side pair made it hard to
 // actually judge the change. Clicking either image IS the decision (no separate "keep
@@ -3229,6 +3280,9 @@ function PanelEditor({
   const setBubbleTailStyle = (bubbleId, tailStyle) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, tailStyle } : b)));
   };
+  const setBubbleArchColor = (bubbleId, archColor) => {
+    onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, archColor } : b)));
+  };
   const setBubbleFont = (bubbleId, font) => {
     onCommitBubbles(panel.id, bubbles.map((b) => (b.id === bubbleId ? { ...b, font } : b)));
   };
@@ -3387,56 +3441,20 @@ function PanelEditor({
             >
               File
             </button>
-            <div className="copy-from-panel-wrap">
-              <button
-                className="panel-image-action-btn"
-                onClick={() => setShowCopyFromPanel((v) => !v)}
-                disabled={imageBusy}
-              >
-                From panel
-              </button>
-              {showCopyFromPanel && (
-                <div className="copy-from-panel-popover">
-                  {allPanels.filter((p) => p.id !== panel.id && p.hasImage).length === 0 ? (
-                    <p className="empty-hint">No other panels have an image yet.</p>
-                  ) : (
-                    allPanels
-                      .filter((p) => p.id !== panel.id && p.hasImage)
-                      .map((p) => (
-                        <button key={p.id} className="copy-from-panel-option" onClick={() => copyFromPanel(p)}>
-                          <img src={p.imageUrl} alt="" />
-                          <span>{p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`}</span>
-                        </button>
-                      ))
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="copy-from-panel-wrap">
-              <button
-                className="panel-image-action-btn"
-                onClick={() => setShowChooseReference((v) => !v)}
-                disabled={imageBusy}
-              >
-                From reference
-              </button>
-              {showChooseReference && (
-                <div className="copy-from-panel-popover">
-                  {references.filter((r) => r.hasImage).length === 0 ? (
-                    <p className="empty-hint">No references have an image yet.</p>
-                  ) : (
-                    references
-                      .filter((r) => r.hasImage)
-                      .map((r) => (
-                        <button key={r.id} className="copy-from-panel-option" onClick={() => chooseFromReference(r)}>
-                          <img src={r.imageUrl} alt="" />
-                          <span>{r.name}</span>
-                        </button>
-                      ))
-                  )}
-                </div>
-              )}
-            </div>
+            <button
+              className="panel-image-action-btn"
+              onClick={() => setShowCopyFromPanel(true)}
+              disabled={imageBusy}
+            >
+              From panel
+            </button>
+            <button
+              className="panel-image-action-btn"
+              onClick={() => setShowChooseReference(true)}
+              disabled={imageBusy}
+            >
+              From reference
+            </button>
             {panel.hasImage && (
               <button className="panel-image-action-btn" onClick={openImageLocation}>
                 Browse
@@ -3766,6 +3784,7 @@ function PanelEditor({
                   onSetShape={(shape) => setBubbleShape(b.id, shape)}
                   onSetTail={(wantTail) => setBubbleTail(b, wantTail)}
                   onSetTailStyle={(tailStyle) => setBubbleTailStyle(b.id, tailStyle)}
+                  onSetArchColor={(archColor) => setBubbleArchColor(b.id, archColor)}
                 />
                 <select
                   className="bubble-list-font"
@@ -4045,6 +4064,35 @@ function PanelEditor({
           </div>
         </div>
       </div>
+    )}
+
+    {showCopyFromPanel && (
+      <ChooseImageModal
+        title="Copy image from another panel"
+        emptyHint="No other panels have an image yet."
+        items={allPanels
+          .filter((p) => p.id !== panel.id && p.hasImage)
+          .map((p) => ({
+            key: p.id,
+            imageUrl: p.imageUrl,
+            label: p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`,
+            value: p,
+          }))}
+        onPick={copyFromPanel}
+        onClose={() => setShowCopyFromPanel(false)}
+      />
+    )}
+
+    {showChooseReference && (
+      <ChooseImageModal
+        title="Choose image from a reference"
+        emptyHint="No references have an image yet."
+        items={references
+          .filter((r) => r.hasImage)
+          .map((r) => ({ key: r.id, imageUrl: r.imageUrl, label: r.name, value: r }))}
+        onPick={chooseFromReference}
+        onClose={() => setShowChooseReference(false)}
+      />
     )}
     </>
   );

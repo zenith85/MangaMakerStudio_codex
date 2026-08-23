@@ -179,7 +179,7 @@ function TailToggle({ hasTail, onToggle }) {
 // spike/dot-trail tail for an open "arch" (zigzag, never converges to a point) — meant
 // for visually bridging two bubbles that share one continuous line of dialogue, not for
 // pointing at a speaker's mouth.
-export default function ShapePicker({ bubble, onSetShape, onSetTail, onSetTailStyle }) {
+export default function ShapePicker({ bubble, onSetShape, onSetTail, onSetTailStyle, onSetArchColor }) {
   const resolved = resolveShape(bubble.shape);
   const currentShape = SHAPES.find((s) => s.value === resolved);
   const hasTail = !!bubble.tail;
@@ -210,6 +210,24 @@ export default function ShapePicker({ bubble, onSetShape, onSetTail, onSetTailSt
             <span className="tail-toggle-knob" />
           </button>
         </label>
+      )}
+      {isArchTail && (
+        <div className="arch-color-toggle">
+          <button
+            type="button"
+            className={`arch-color-btn${bubble.archColor !== "white" ? " active" : ""}`}
+            onClick={() => onSetArchColor("black")}
+          >
+            Black
+          </button>
+          <button
+            type="button"
+            className={`arch-color-btn${bubble.archColor === "white" ? " active" : ""}`}
+            onClick={() => onSetArchColor("white")}
+          >
+            White
+          </button>
+        </div>
       )}
     </div>
   );

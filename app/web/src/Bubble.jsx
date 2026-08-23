@@ -660,7 +660,15 @@ export default function Bubble({ bubble, containerRef, editable, onChange, onDel
             />
           ))}
           {archPoints.length > 0 && (
-            <polyline points={pointsToString(archPoints)} vectorEffect="non-scaling-stroke" style={borderStyle || undefined} />
+            // bubble.archColor picks the connector's own color (black or white) —
+            // independent of the main outline's borderColor, since the arch is meant to
+            // stay visible over whatever's underneath it (dark panel art vs. light),
+            // which the bubble's own border color has no reason to track.
+            <polyline
+              points={pointsToString(archPoints)}
+              vectorEffect="non-scaling-stroke"
+              style={{ stroke: bubble.archColor === "white" ? "#ffffff" : "#1a1a1a" }}
+            />
           )}
         </svg>
 
