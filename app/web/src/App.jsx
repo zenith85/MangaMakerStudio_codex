@@ -1302,6 +1302,7 @@ export default function App() {
           objects={entities.objects}
           references={entities.references}
           allPanels={allPanelsForMention}
+          previousPageId={currentPageIndex > 0 ? pages[currentPageIndex - 1].id : null}
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
           onDelete={deletePanel}
@@ -2898,6 +2899,7 @@ function PanelEditor({
   objects,
   references,
   allPanels,
+  previousPageId,
   onClose,
   onUpdated,
   onDelete,
@@ -2947,6 +2949,12 @@ function PanelEditor({
   // saved to the panel itself, only used for the next generate/edit call — see PoseSketchPad.
   const [poseSketch, setPoseSketch] = useState(null); // data URL | null
   const [showPoseSketch, setShowPoseSketch] = useState(false);
+  // "Reference last page" (Scene tab only, next to Pose reference) — when on, the next
+  // Generate/Regenerate hands Codex a small composite of every panel on the PREVIOUS
+  // page as extra context, so it can match the established setting/lighting/character
+  // positions without the user having to describe "the environment" by hand each time.
+  // Ephemeral, same as poseSketch — nothing here is saved to the panel.
+  const [referenceLastPage, setReferenceLastPage] = useState(false);
   // Live value while dragging the zoom slider or typing in either number box — null
   // means "not editing, show the committed panel value instead" (see the inputs below).
   const [zoomDraft, setZoomDraft] = useState(null);
@@ -2984,7 +2992,8 @@ function PanelEditor({
     setBusy(true);
     setError("");
     try {
-      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc, poseSketch });
+      const lastPageId = referenceLastPage && previousPageId ? previousPageId : undefined;
+      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc, poseSketch, lastPageId });
       await onUpdated();
     } catch (err) {
       setError(err.message);
@@ -3673,6 +3682,27 @@ function PanelEditor({
           <button type="button" className="panel-image-action-btn" onClick={() => setShowPoseSketch(true)}>
             {poseSketch ? "✓ Pose reference drawn — edit" : "+ Draw pose reference"}
           </button>
+
+          <label
+            className="tail-toggle reference-last-page-toggle"
+            title={
+              previousPageId
+                ? "Hand Codex a small composite of the previous page's panels, so it knows the established setting/environment"
+                : "There's no previous page in this project yet"
+            }
+          >
+            <span className="tail-toggle-label">Reference last page</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={referenceLastPage}
+              disabled={!previousPageId}
+              className={`tail-toggle-switch${referenceLastPage ? " on" : ""}`}
+              onClick={() => setReferenceLastPage((v) => !v)}
+            >
+              <span className="tail-toggle-knob" />
+            </button>
+          </label>
 
           {error && <p className="error">{error}</p>}
 

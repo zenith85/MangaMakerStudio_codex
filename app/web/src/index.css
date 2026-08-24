@@ -1144,6 +1144,15 @@ button {
   transform: translateX(16px);
 }
 
+.tail-toggle-switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.reference-last-page-toggle {
+  margin: 10px 0;
+}
+
 .arch-color-toggle {
   display: flex;
   gap: 6px;

@@ -74,10 +74,12 @@ function describeReferencedEntities({ characters = [], places = [], objects = []
   return parts;
 }
 
-// hasPoseSketch: the caller (see index.js's /generate route) always appends the pose
-// sketch, when present, as the LAST reference image — after every entity/continuity
-// image already pushed by describeReferencedEntities — so "the LAST attached reference
-// image" here is unambiguous regardless of how many other references this scene has.
+// hasLastPageThumbnail/hasPoseSketch: the caller (see index.js's /generate route)
+// always appends these, when present, in this fixed order — last-page thumbnail first,
+// then the pose sketch — after every entity/continuity image already pushed by
+// describeReferencedEntities. Described here by exact position (LAST vs.
+// SECOND-TO-LAST) rather than generically, since there are only ever these two optional
+// trailing images to account for.
 export function buildPrompt({
   sceneDescription,
   characters,
@@ -86,10 +88,17 @@ export function buildPrompt({
   references = [],
   continuityPanels = [],
   stylePreset,
+  hasLastPageThumbnail = false,
   hasPoseSketch = false,
 }) {
   const parts = [sceneDescription?.trim() || "A manga panel."];
   parts.push(...describeReferencedEntities({ characters, places, objects, references, continuityPanels }));
+  const lastPageOrdinal = hasPoseSketch ? "SECOND-TO-LAST" : "LAST";
+  if (hasLastPageThumbnail) {
+    parts.push(
+      `The ${lastPageOrdinal} attached reference image is a small composite of every panel on the PREVIOUS page, for overall scene/environment continuity — matching things like the setting, lighting, and where characters/objects are positioned when the new scene follows on from it. It is just visual context, not a layout to copy: do not reproduce its grid of panels, borders, or composition in your output.`
+    );
+  }
   if (hasPoseSketch) {
     parts.push(
       "The LAST attached reference image is a simple hand-drawn stick-figure sketch showing the desired body pose/motion for the main character in this scene — match that pose and body positioning as closely as possible. Do NOT draw, keep, or reference the stick figure itself; render a normal fully-drawn character in that pose."

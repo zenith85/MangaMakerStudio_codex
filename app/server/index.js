@@ -40,6 +40,7 @@ import {
 import { generateImageViaCodex, translateTextsViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
 import { applyImageFilter } from "./imageFilters.js";
+import { composePageThumbnail } from "./pageThumbnail.js";
 import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -738,10 +739,10 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
-    // poseSketch is a one-shot input for THIS generation only — pulled out before the
-    // Object.assign below (which persists everything else in the body, e.g. sceneDoc),
-    // since it's a data URL and would otherwise get permanently baked into pages.json.
-    const { poseSketch, ...panelPatch } = req.body;
+    // poseSketch/lastPageId are one-shot inputs for THIS generation only — pulled out
+    // before the Object.assign below (which persists everything else in the body, e.g.
+    // sceneDoc), since neither belongs permanently on the panel itself.
+    const { poseSketch, lastPageId, ...panelPatch } = req.body;
     Object.assign(panel, panelPatch); // sceneDoc
     savePages(projectId, pages);
 
@@ -772,6 +773,11 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
         panelId: p.id,
       }));
 
+    // "Reference last page" (see the Scene tab toggle) — a small composite of every
+    // panel on the given page, for loose scene/environment continuity. null if the
+    // frontend didn't ask for one (toggle off, or there's no previous page) or that
+    // page has no panel images yet to composite.
+    const lastPageThumbnail = lastPageId ? await composePageThumbnail(projectId, lastPageId) : null;
     const poseSketchBuffer = decodeDataUrl(poseSketch);
     const referenceImages = [
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
@@ -779,8 +785,9 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
       ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
       ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
-      // Always LAST — see buildPrompt's hasPoseSketch note, which refers to "the LAST
-      // attached reference image".
+      // Always in this order, always LAST(-ish) — see buildPrompt's hasLastPageThumbnail/
+      // hasPoseSketch notes, which describe these two by exact trailing position.
+      ...(lastPageThumbnail ? [lastPageThumbnail] : []),
       ...(poseSketchBuffer ? [poseSketchBuffer] : []),
     ];
 
@@ -792,6 +799,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       references,
       continuityPanels,
       stylePreset: page.stylePreset,
+      hasLastPageThumbnail: !!lastPageThumbnail,
       hasPoseSketch: !!poseSketchBuffer,
     });
 
