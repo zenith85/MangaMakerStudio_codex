@@ -63,31 +63,47 @@ async function normalizeUploadedImage(buffer) {
   }
 }
 
-function isValidMarkerRect(rect) {
+function isValidMarker(m) {
+  if (!m || typeof m !== "object") return false;
+  if (m.type === "arrow") {
+    return ["x1", "y1", "x2", "y2"].every((k) => Number.isFinite(m[k])) && Math.hypot(m.x2 - m.x1, m.y2 - m.y1) > 0.5;
+  }
   return (
-    rect &&
-    typeof rect === "object" &&
-    ["x", "y", "width", "height"].every((k) => Number.isFinite(rect[k])) &&
-    rect.width > 0.5 &&
-    rect.height > 0.5
+    ["x", "y", "width", "height"].every((k) => Number.isFinite(m[k])) && m.width > 0.5 && m.height > 0.5
   );
 }
 
-// Bakes a red rectangle onto a COPY of the panel image, in image-pixel coordinates
-// derived from rect's 0-100 percentages (as drawn by the user over the displayed image on
-// the frontend, which shows the same unrotated/unscaled source file). This copy is sent
-// to Codex as an extra reference image purely to point at the edit region — see
-// buildEditPrompt's hasMarker note, which tells Codex not to reproduce the rectangle.
-async function drawMarkerRect(imageBuffer, rect) {
+// Bakes red annotations (boxes and/or arrows) onto a COPY of the panel image, in
+// image-pixel coordinates derived from each marker's 0-100 percentages (as drawn by the
+// user over the displayed image on the frontend, which shows the same unrotated/unscaled
+// source file). This copy is sent to Codex as an extra reference image purely to point
+// at the edit region/direction — see buildEditPrompt's hasMarker note, which tells Codex
+// not to reproduce the markup.
+async function drawMarkers(imageBuffer, markers) {
   const { width: imgW, height: imgH } = await sharp(imageBuffer).metadata();
   const strokeWidth = Math.max(4, Math.round(Math.min(imgW, imgH) * 0.008));
-  const x = (rect.x / 100) * imgW;
-  const y = (rect.y / 100) * imgH;
-  const w = (rect.width / 100) * imgW;
-  const h = (rect.height / 100) * imgH;
+  const shapes = markers
+    .map((m) => {
+      if (m.type === "arrow") {
+        const x1 = (m.x1 / 100) * imgW;
+        const y1 = (m.y1 / 100) * imgH;
+        const x2 = (m.x2 / 100) * imgW;
+        const y2 = (m.y2 / 100) * imgH;
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="red" stroke-width="${strokeWidth}" marker-end="url(#edit-arrowhead)" />`;
+      }
+      const x = (m.x / 100) * imgW;
+      const y = (m.y / 100) * imgH;
+      const w = (m.width / 100) * imgW;
+      const h = (m.height / 100) * imgH;
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="red" stroke-width="${strokeWidth}" />`;
+    })
+    .join("");
   const svg =
     `<svg width="${imgW}" height="${imgH}" xmlns="http://www.w3.org/2000/svg">` +
-    `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="red" stroke-width="${strokeWidth}" /></svg>`;
+    `<defs><marker id="edit-arrowhead" markerWidth="4" markerHeight="4" refX="3.5" refY="2" orient="auto">` +
+    `<polygon points="0 0, 4 2, 0 4" fill="red" /></marker></defs>` +
+    shapes +
+    `</svg>`;
   return sharp(imageBuffer)
     .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
     .png()
@@ -885,7 +901,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;
-    const { instructions, sceneDoc, markerRect, poseSketch, baseImage } = req.body;
+    const { instructions, sceneDoc, markers, poseSketch, baseImage } = req.body;
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
@@ -897,7 +913,8 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
     const currentImage = decodeDataUrl(baseImage) || loadPanelImage(projectId, pageId, panel.id);
     if (!currentImage) return res.status(400).json({ error: "panel has no image to edit" });
 
-    const markedImage = isValidMarkerRect(markerRect) ? await drawMarkerRect(currentImage, markerRect) : null;
+    const validMarkers = Array.isArray(markers) ? markers.filter(isValidMarker) : [];
+    const markedImage = validMarkers.length ? await drawMarkers(currentImage, validMarkers) : null;
 
     // sceneDoc (a Tiptap doc, like a panel's own scene description) carries any
     // #/!/@-mentioned characters/places/objects/references/panels; plain `instructions`

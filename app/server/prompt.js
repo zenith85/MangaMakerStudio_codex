@@ -139,7 +139,7 @@ export function buildEditPrompt({
   ];
   if (hasMarker) {
     parts.push(
-      "The SECOND attached reference image is the exact same panel with a red rectangle drawn on it, marking where the requested change should happen — it is only a locator, not part of the artwork. Do not draw, keep, or reference any red rectangle/box/outline in your output; the edited image must look like a normal panel with no markup on it."
+      "The SECOND attached reference image is the exact same panel with red annotations drawn on it: a red rectangle marks the exact spot needing the change, and/or a red arrow shows a direction of motion or how something should move/turn. These are only locators, not part of the artwork. Do not draw, keep, or reference any red rectangle/arrow/outline in your output; the edited image must look like a normal panel with no markup on it."
     );
   }
   parts.push(`Requested change: ${instructions?.trim() || "Improve the image."}`);

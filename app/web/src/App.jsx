@@ -2991,10 +2991,14 @@ function PanelEditor({
   const [editChatInput, setEditChatInput] = useState("");
   const [editChatBusy, setEditChatBusy] = useState(false);
   const [editChatError, setEditChatError] = useState("");
-  // Marks the region that needs the change, as 0-100 percentages of the panel's own
-  // image — drawn by the user over the preview below, sent alongside the edit request,
-  // but never part of the edited result (see backend's drawMarkerRect/buildEditPrompt).
-  const [editMarker, setEditMarker] = useState(null); // { x, y, width, height } | null
+  // Marks (boxes and/or arrows) pointing Codex at what needs to change, as 0-100
+  // percentages of the panel's own image — drawn by the user over the preview below,
+  // sent alongside the edit request, but never part of the edited result (see backend's
+  // drawMarkers/buildEditPrompt). A box marks a location; an arrow shows a direction of
+  // motion — e.g. "turn the head this way" is hard to say in words but easy to draw.
+  const [editMarkers, setEditMarkers] = useState([]); // [{ id, type: "rect", x, y, width, height } | { id, type: "arrow", x1, y1, x2, y2 }]
+  const [drawingMarker, setDrawingMarker] = useState(null); // the in-progress shape, not yet finalized
+  const [editMarkerTool, setEditMarkerTool] = useState("rect"); // "rect" | "arrow" — which shape the next drag draws
   const [editMarkerAspect, setEditMarkerAspect] = useState(null);
   const editMarkerBoxRef = useRef(null);
   const editMarkerDragRef = useRef(null);
@@ -3179,7 +3183,7 @@ function PanelEditor({
     setEditBusy(true);
     setEditError("");
     try {
-      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarker, poseSketch);
+      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarkers, poseSketch);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
       // A fresh edit request starts a new refinement session — any chat candidate from
@@ -3226,7 +3230,7 @@ function PanelEditor({
     setEditCandidate(null);
     setEditChatCandidate(null);
     setEditDoc(EMPTY_DOC);
-    setEditMarker(null);
+    setEditMarkers([]);
     setEditChat([]);
     setEditChatInput("");
     setEditChatError("");
@@ -3276,7 +3280,7 @@ function PanelEditor({
   // Percentages relative to the marker box's own rendered bounding rect, which is sized
   // via editMarkerAspect to exactly match the image's natural aspect ratio (see onLoad
   // below) — so these percentages line up 1:1 with the image-pixel math the backend does
-  // in drawMarkerRect, regardless of how big the box is drawn on screen.
+  // in drawMarkers, regardless of how big the box is drawn on screen.
   const editMarkerPercentFromEvent = (e) => {
     const rect = editMarkerBoxRef.current.getBoundingClientRect();
     return {
@@ -3289,8 +3293,12 @@ function PanelEditor({
     if (e.button !== 0) return;
     e.preventDefault();
     const start = editMarkerPercentFromEvent(e);
-    editMarkerDragRef.current = { start };
-    setEditMarker({ x: start.x, y: start.y, width: 0, height: 0 });
+    editMarkerDragRef.current = { tool: editMarkerTool, start };
+    setDrawingMarker(
+      editMarkerTool === "arrow"
+        ? { type: "arrow", x1: start.x, y1: start.y, x2: start.x, y2: start.y }
+        : { type: "rect", x: start.x, y: start.y, width: 0, height: 0 }
+    );
     window.addEventListener("pointermove", onEditMarkerPointerMove);
     window.addEventListener("pointerup", onEditMarkerPointerUp);
   };
@@ -3299,13 +3307,17 @@ function PanelEditor({
     const d = editMarkerDragRef.current;
     if (!d) return;
     const cur = editMarkerPercentFromEvent(e);
-    d.last = {
-      x: Math.min(d.start.x, cur.x),
-      y: Math.min(d.start.y, cur.y),
-      width: Math.abs(cur.x - d.start.x),
-      height: Math.abs(cur.y - d.start.y),
-    };
-    setEditMarker(d.last);
+    d.last =
+      d.tool === "arrow"
+        ? { type: "arrow", x1: d.start.x, y1: d.start.y, x2: cur.x, y2: cur.y }
+        : {
+            type: "rect",
+            x: Math.min(d.start.x, cur.x),
+            y: Math.min(d.start.y, cur.y),
+            width: Math.abs(cur.x - d.start.x),
+            height: Math.abs(cur.y - d.start.y),
+          };
+    setDrawingMarker(d.last);
   };
 
   const onEditMarkerPointerUp = () => {
@@ -3313,9 +3325,13 @@ function PanelEditor({
     window.removeEventListener("pointerup", onEditMarkerPointerUp);
     const d = editMarkerDragRef.current;
     editMarkerDragRef.current = null;
-    // A stray click (no real drag) leaves a near-zero-size box — drop it rather than
-    // sending a meaningless sliver of a marker.
-    if (!d?.last || d.last.width < 1 || d.last.height < 1) setEditMarker(null);
+    setDrawingMarker(null);
+    const m = d?.last;
+    if (!m) return;
+    // A stray click (no real drag) leaves a near-zero-size shape — drop it rather than
+    // adding a meaningless sliver of a marker.
+    const tooSmall = m.type === "arrow" ? Math.hypot(m.x2 - m.x1, m.y2 - m.y1) < 1 : m.width < 1 || m.height < 1;
+    if (!tooSmall) setEditMarkers((prev) => [...prev, { id: crypto.randomUUID(), ...m }]);
   };
 
   const clearImage = async () => {
@@ -3779,10 +3795,26 @@ function PanelEditor({
         <section className="panel-editor-lower">
           <h4>Edit generated image</h4>
           <p className="scene-editor-hint">
-            Optionally drag a box on the image below to point at the exact spot that needs
-            the change — it's just a pointer for Codex, the box itself never shows up in
-            the edited result.
+            Optionally draw on the image below to point Codex at what needs the change —
+            a box for an exact spot, an arrow for a direction of motion (e.g. "turn the
+            head this way"). None of this markup shows up in the edited result.
           </p>
+          <div className="edit-marker-toolbar">
+            <button
+              type="button"
+              className={`edit-marker-tool-btn${editMarkerTool === "rect" ? " active" : ""}`}
+              onClick={() => setEditMarkerTool("rect")}
+            >
+              Box
+            </button>
+            <button
+              type="button"
+              className={`edit-marker-tool-btn${editMarkerTool === "arrow" ? " active" : ""}`}
+              onClick={() => setEditMarkerTool("arrow")}
+            >
+              Arrow
+            </button>
+          </div>
           <div
             ref={editMarkerBoxRef}
             className="edit-marker-box"
@@ -3795,24 +3827,46 @@ function PanelEditor({
               draggable={false}
               onLoad={(e) => setEditMarkerAspect(e.target.naturalWidth / e.target.naturalHeight)}
             />
-            {editMarker && (
-              <div
-                className="edit-marker-rect"
-                style={{
-                  left: `${editMarker.x}%`,
-                  top: `${editMarker.y}%`,
-                  width: `${editMarker.width}%`,
-                  height: `${editMarker.height}%`,
-                }}
-              />
+            {[...editMarkers, ...(drawingMarker ? [drawingMarker] : [])].map((m, i) =>
+              m.type === "arrow" ? (
+                <svg key={m.id || "drawing"} className="edit-marker-arrow-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <defs>
+                    <marker
+                      id={`edit-marker-arrowhead-${m.id || "drawing"}`}
+                      markerWidth="4"
+                      markerHeight="4"
+                      refX="3.5"
+                      refY="2"
+                      orient="auto"
+                    >
+                      <polygon points="0 0, 4 2, 0 4" fill="#ff3b30" />
+                    </marker>
+                  </defs>
+                  <line
+                    x1={m.x1}
+                    y1={m.y1}
+                    x2={m.x2}
+                    y2={m.y2}
+                    stroke="#ff3b30"
+                    strokeWidth="1"
+                    markerEnd={`url(#edit-marker-arrowhead-${m.id || "drawing"})`}
+                  />
+                </svg>
+              ) : (
+                <div
+                  key={m.id || "drawing"}
+                  className="edit-marker-rect"
+                  style={{ left: `${m.x}%`, top: `${m.y}%`, width: `${m.width}%`, height: `${m.height}%` }}
+                />
+              )
             )}
-            {editMarker && (
+            {editMarkers.length > 0 && (
               <button
                 type="button"
                 className="edit-marker-clear"
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setEditMarker(null)}
-                title="Clear marker"
+                onClick={() => setEditMarkers([])}
+                title="Clear all markers"
               >
                 ×
               </button>
