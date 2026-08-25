@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseSceneDoc } from "./scene.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
@@ -92,6 +93,8 @@ function entityDir(projectId, kind, entityId) {
 function writeInformationTxt(dir, meta) {
   const lines = [`Name: ${meta.name}`];
   if (meta.style) lines.push(`Style: ${meta.style}`);
+  const description = meta.descriptionDoc ? parseSceneDoc(meta.descriptionDoc).plainText : "";
+  if (description) lines.push(`Description: ${description}`);
   for (const [key, value] of Object.entries(meta.fields || {})) {
     if (String(value ?? "").trim() === "") continue;
     lines.push(`${key.charAt(0).toUpperCase()}${key.slice(1)}: ${value}`);
@@ -127,14 +130,14 @@ export function getEntity(projectId, kind, entityId) {
   return readEntity(projectId, kind, entityId);
 }
 
-export function createEntity(projectId, kind, { name, fields = {}, style = "" }) {
+export function createEntity(projectId, kind, { name, fields = {}, style = "", descriptionDoc }) {
   const kindDir = path.join(projectDir(projectId), kind);
   fs.mkdirSync(kindDir, { recursive: true });
   const id = uniqueSlug(kindDir, name);
   const dir = path.join(kindDir, id);
   fs.mkdirSync(dir, { recursive: true });
 
-  const meta = { name: name.trim(), fields, style, createdAt: Date.now() };
+  const meta = { name: name.trim(), fields, style, descriptionDoc, createdAt: Date.now() };
   writeJSON(path.join(dir, "meta.json"), meta);
   writeInformationTxt(dir, meta);
   return { ...meta, id, hasImage: false };
@@ -148,6 +151,7 @@ export function updateEntity(projectId, kind, entityId, updates) {
   if (updates.name?.trim()) meta.name = updates.name.trim();
   if (updates.fields) meta.fields = { ...meta.fields, ...updates.fields };
   if (updates.style !== undefined) meta.style = updates.style;
+  if (updates.descriptionDoc !== undefined) meta.descriptionDoc = updates.descriptionDoc;
 
   writeJSON(path.join(dir, "meta.json"), meta);
   writeInformationTxt(dir, meta);
@@ -167,8 +171,13 @@ export function loadEntityImage(projectId, kind, entityId) {
   return fs.existsSync(p) ? fs.readFileSync(p) : null;
 }
 
+// mtime cache-busting, same reasoning as panelImageInfo/filterImageInfo — without it,
+// redrawing/regenerating an entity overwrites image.png at the same URL, so the browser
+// just serves its cached copy of the old picture instead of refetching the new one.
 export function entityImageUrl(projectId, kind, entityId) {
-  return `${LOCAL_ORIGIN}/projects/${projectId}/${kind}/${entityId}/image.png`;
+  const p = entityImagePath(projectId, kind, entityId);
+  const v = fs.existsSync(p) ? Math.round(fs.statSync(p).mtimeMs) : 0;
+  return `${LOCAL_ORIGIN}/projects/${projectId}/${kind}/${entityId}/image.png?v=${v}`;
 }
 
 // ---------- Custom fonts: ProjectName/fonts/<id>/ ----------

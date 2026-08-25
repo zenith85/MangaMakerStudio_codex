@@ -191,6 +191,14 @@ for (const kind of ENTITY_KINDS) {
         return res.status(400).json({ error: "fields must be valid JSON" });
       }
     }
+    let descriptionDoc;
+    if (req.body.descriptionDoc) {
+      try {
+        descriptionDoc = JSON.parse(req.body.descriptionDoc);
+      } catch {
+        return res.status(400).json({ error: "descriptionDoc must be valid JSON" });
+      }
+    }
     if (req.file) {
       try {
         req.file.buffer = await normalizeUploadedImage(req.file.buffer);
@@ -198,7 +206,7 @@ for (const kind of ENTITY_KINDS) {
         return res.status(400).json({ error: err.message });
       }
     }
-    const entity = createEntity(req.params.projectId, kind, { name, fields, style });
+    const entity = createEntity(req.params.projectId, kind, { name, fields, style, descriptionDoc });
     if (req.file) saveEntityImage(req.params.projectId, kind, entity.id, req.file.buffer);
     res.json(withEntityUrl(req.params.projectId, kind, getEntity(req.params.projectId, kind, entity.id)));
   });
@@ -213,6 +221,14 @@ for (const kind of ENTITY_KINDS) {
         return res.status(400).json({ error: "fields must be valid JSON" });
       }
     }
+    let descriptionDoc;
+    if (req.body.descriptionDoc) {
+      try {
+        descriptionDoc = JSON.parse(req.body.descriptionDoc);
+      } catch {
+        return res.status(400).json({ error: "descriptionDoc must be valid JSON" });
+      }
+    }
     if (req.file) {
       try {
         req.file.buffer = await normalizeUploadedImage(req.file.buffer);
@@ -220,7 +236,7 @@ for (const kind of ENTITY_KINDS) {
         return res.status(400).json({ error: err.message });
       }
     }
-    const entity = updateEntity(projectId, kind, id, { name: req.body.name, fields, style: req.body.style });
+    const entity = updateEntity(projectId, kind, id, { name: req.body.name, fields, style: req.body.style, descriptionDoc });
     if (!entity) return res.status(404).json({ error: `${kind} not found` });
     if (req.file) saveEntityImage(projectId, kind, id, req.file.buffer); // manual upload = a "redraw" too
     res.json(withEntityUrl(projectId, kind, getEntity(projectId, kind, id)));
@@ -267,8 +283,49 @@ for (const kind of GENERATABLE_KINDS) {
       const entity = getEntity(projectId, kind, id);
       if (!entity) return res.status(404).json({ error: `${kind} not found` });
 
-      const prompt = buildEntityPrompt({ kind, name: entity.name, fields: entity.fields, style: entity.style });
-      await generateImageViaCodex(projectId, entityImagePath(projectId, kind, id), prompt);
+      // Same #/!/@ mention system as a panel's scene description (see the /generate
+      // route below) — lets a character/place/object's own description reference other
+      // entities/panels for visual context (e.g. a character described relative to a place).
+      const { plainText, characterIds, placeIds, objectIds, referenceIds, panelIds } = entity.descriptionDoc
+        ? parseSceneDoc(entity.descriptionDoc)
+        : { plainText: "", characterIds: [], placeIds: [], objectIds: [], referenceIds: [], panelIds: [] };
+
+      const characters = characterIds.map((cid) => getEntity(projectId, "characters", cid)).filter(Boolean);
+      const places = placeIds.map((pid) => getEntity(projectId, "places", pid)).filter(Boolean);
+      const objects = objectIds.map((oid) => getEntity(projectId, "objects", oid)).filter(Boolean);
+      const references = referenceIds.map((rid) => getEntity(projectId, "references", rid)).filter(Boolean);
+
+      const pages = listPages(projectId);
+      const continuityPanels = panelIds
+        .map((pid) => {
+          for (const pg of pages) {
+            const found = pg.panels.find((p) => p.id === pid);
+            if (found) return { ...found, pageId: pg.id, pageTitle: pg.title };
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .map((p) => ({
+          order: p.order,
+          pageTitle: p.pageTitle,
+          plainText: parseSceneDoc(p.sceneDoc).plainText,
+          pageId: p.pageId,
+          panelId: p.id,
+        }));
+
+      const referenceImages = [
+        ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
+        ...places.map((p) => loadEntityImage(projectId, "places", p.id)).filter(Boolean),
+        ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
+        ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
+        ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
+      ];
+
+      const prompt = buildEntityPrompt({
+        kind, name: entity.name, fields: entity.fields, style: entity.style,
+        description: plainText, characters, places, objects, references, continuityPanels,
+      });
+      await generateImageViaCodex(projectId, entityImagePath(projectId, kind, id), prompt, referenceImages);
 
       res.json({ ...withEntityUrl(projectId, kind, getEntity(projectId, kind, id)), prompt });
     } catch (err) {

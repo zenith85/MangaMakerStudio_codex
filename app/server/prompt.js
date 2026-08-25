@@ -16,10 +16,11 @@ function describeFields(fields) {
     .join(", ");
 }
 
-// Shared between buildPrompt (a new scene) and buildEditPrompt (editing an existing
-// one) — both need to describe whichever characters/places/objects/references/continuity
-// panels got #/!/@-mentioned, just with different framing around it.
-function describeReferencedEntities({ characters = [], places = [], objects = [], references = [], continuityPanels = [] }) {
+// Shared between buildPrompt/buildEditPrompt (a panel's scene description) and
+// buildEntityPrompt (a character/place/object's own description) — all three need to
+// describe whichever characters/places/objects/references/panels got #/!/@-mentioned,
+// just with different framing around it.
+export function describeReferencedEntities({ characters = [], places = [], objects = [], references = [], continuityPanels = [] }) {
   const parts = [];
   if (characters.length) {
     parts.push(
@@ -164,11 +165,16 @@ const KIND_NOUN = { characters: "character", places: "place", objects: "object" 
 // Builds the prompt for generating a single reference asset (a character's
 // reference sheet, a place's establishing image, an object's reference image)
 // rather than a full composed manga panel.
-export function buildEntityPrompt({ kind, name, fields, style }) {
+export function buildEntityPrompt({
+  kind, name, fields, style, description,
+  characters, places, objects, references = [], continuityPanels = [],
+}) {
   const noun = KIND_NOUN[kind] || "subject";
   const details = describeFields(fields);
   const parts = [`A single reference image of a ${noun} named ${name}.`];
+  if (description?.trim()) parts.push(description.trim() + ".");
   if (details) parts.push(details + ".");
+  parts.push(...describeReferencedEntities({ characters, places, objects, references, continuityPanels }));
   if (kind === "characters") {
     parts.push("Full body, front-facing, neutral pose, plain white background, character reference sheet style.");
   } else if (kind === "objects") {

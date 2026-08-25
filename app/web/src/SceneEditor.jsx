@@ -48,6 +48,12 @@ function mentionSuggestion(char, itemsRef) {
       return {
         onStart: (props) => {
           component = new ReactRenderer(MentionList, { props, editor: props.editor });
+          // Tiptap mounts this straight onto <body>, outside any dialog's DOM — with no
+          // z-index it's z-index:auto, which paints behind .modal-backdrop (z-index 30)
+          // whenever SceneEditor is used inside a modal (e.g. EntityCreatorModal), even
+          // though it's positioned on top visually. Above the always-on-top terminal (40)
+          // too, since you're mid-interaction picking a mention and it must stay reachable.
+          component.element.style.zIndex = "50";
           if (!props.clientRect) return;
           unmount = props.mount(component.element);
         },

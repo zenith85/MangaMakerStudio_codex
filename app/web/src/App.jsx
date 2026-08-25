@@ -326,6 +326,14 @@ LAYOUTS.push(...DIAGONAL_LAYOUTS);
 // instructions editor, which is a fresh Tiptap doc each time, not loaded from a panel.
 const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
+// Wraps a legacy plain-text description (entities saved before descriptionDoc existed,
+// under fields.description) as a one-paragraph Tiptap doc, so old entities still show
+// their description in the new SceneEditor instead of appearing blank.
+function plainTextToDoc(text) {
+  if (!text?.trim()) return EMPTY_DOC;
+  return { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] };
+}
+
 // Mirrors server/imageFilters.js's per-type params — kept in sync by hand since the
 // server and browser bundles can't share source. Each filter takes exactly one adjustable
 // slider param; `key` is the name that param is sent to the backend under.
@@ -1322,6 +1330,11 @@ export default function App() {
           projectId={currentProjectId}
           kind={editingEntity.kind}
           entity={editingEntity.entity}
+          characters={entities.characters}
+          places={entities.places}
+          objects={entities.objects}
+          references={entities.references}
+          allPanels={allPanelsForMention}
           onClose={() => setEditingEntity(null)}
           onSaved={() => refreshEntities(currentProjectId)}
         />
@@ -1585,7 +1598,10 @@ function FieldsEditor({ fields, onChange }) {
 // The character/place/object creator: fill in info, pick a style, then either upload a
 // picture or click Generate to bridge everything to Codex. Redraw just re-runs
 // generate against the same entity, replacing its image.
-function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, onSaved }) {
+function EntityCreatorModal({
+  projectId, kind, entity: initialEntity, characters, places, objects, references, allPanels,
+  onClose, onSaved,
+}) {
   const singular = ENTITY_KINDS.find((k) => k.value === kind).singular;
   const generatable = GENERATABLE_ENTITY_KINDS.has(kind);
   const [entity, setEntity] = useState(initialEntity);
@@ -1594,7 +1610,11 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
   const [fields, setFields] = useState(
     Object.fromEntries(Object.entries(initialEntity?.fields || {}).filter(([k]) => k !== "description"))
   );
-  const [description, setDescription] = useState(initialEntity?.fields?.description || "");
+  // descriptionDoc is the new #/!/@-mention-aware format; fall back to the legacy plain
+  // fields.description string (entities saved before this existed) wrapped as a doc.
+  const [descriptionDoc, setDescriptionDoc] = useState(
+    initialEntity?.descriptionDoc || plainTextToDoc(initialEntity?.fields?.description || "")
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [imageTab, setImageTab] = useState("create");
@@ -1612,8 +1632,6 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
     };
   }, [pendingPreviewUrl]);
 
-  const allFields = { ...fields, description };
-
   const saveDetails = async () => {
     setBusy(true);
     setError("");
@@ -1623,7 +1641,8 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
       // References are just a name + picture — no style/fields to save.
       if (generatable) {
         formData.append("style", style);
-        formData.append("fields", JSON.stringify(allFields));
+        formData.append("fields", JSON.stringify(fields));
+        formData.append("descriptionDoc", JSON.stringify(descriptionDoc));
       }
       if (entity) {
         const updated = await api.updateEntity(projectId, kind, entity.id, formData);
@@ -1681,6 +1700,30 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
     if (file && file.type.startsWith("image/")) pickImage(file);
   };
 
+  // Kept up to date every render so the paste listener below (registered once, on
+  // mount) always calls the current pickImage — it closes over entity/pendingPreviewUrl,
+  // which change as the user picks images, and a stale closure would silently stop
+  // revoking old blob URLs (or worse, act on stale state) after the first paste.
+  const pickImageRef = useRef(pickImage);
+  pickImageRef.current = pickImage;
+
+  // Paste (Ctrl/Cmd+V) anywhere in this dialog picks up an image straight from the
+  // clipboard — a screenshot or a copied picture — same as drag-and-drop. Listens on
+  // the document rather than a specific element since paste events only fire on
+  // whatever currently has focus, and a plain (non-editable) div can't receive them
+  // directly. Only acts when the clipboard actually contains image data, so pasting
+  // text into Name/Details fields is unaffected.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+      if (!item) return;
+      e.preventDefault();
+      pickImageRef.current(item.getAsFile());
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
+
   const uploadImage = async (file) => {
     setBusy(true);
     setError("");
@@ -1704,6 +1747,12 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
     onClose();
   };
 
+  // An entity can't usefully reference itself — excluded from its own kind's mention
+  // list the same way a panel's scene editor excludes the panel currently being edited.
+  const mentionCharacters = kind === "characters" ? characters.filter((c) => c.id !== entity?.id) : characters;
+  const mentionPlaces = kind === "places" ? places.filter((p) => p.id !== entity?.id) : places;
+  const mentionObjects = kind === "objects" ? objects.filter((o) => o.id !== entity?.id) : objects;
+
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal entity-modal">
@@ -1720,7 +1769,15 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
             {generatable && (
               <>
                 <h4>Description</h4>
-                <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
+                <SceneEditor
+                  content={descriptionDoc}
+                  onChange={setDescriptionDoc}
+                  characters={mentionCharacters}
+                  places={mentionPlaces}
+                  objects={mentionObjects}
+                  references={references}
+                  panels={allPanels}
+                />
 
                 <h4>Details</h4>
                 <FieldsEditor fields={fields} onChange={setFields} />
@@ -1776,7 +1833,7 @@ function EntityCreatorModal({ projectId, kind, entity: initialEntity, onClose, o
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={onImageDrop}
               >
-                Drop an image here, or choose one below
+                Drop an image here, paste one (Ctrl/Cmd+V), or choose one below
               </div>
             )}
 
