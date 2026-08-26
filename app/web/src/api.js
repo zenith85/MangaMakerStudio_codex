@@ -87,10 +87,10 @@ export const api = {
   // (the CURRENT candidate, as a data URL) with a plain-text instruction rather than the
   // original panel image, chaining refinements. Same raw-bytes response as
   // requestPanelEdit, and for the same reason: still just a preview, nothing committed.
-  refinePanelEdit: async (projectId, pageId, panelId, instructions, baseImage) => {
+  refinePanelEdit: async (projectId, pageId, panelId, instructions, baseImage, markers) => {
     const res = await fetch(`${BASE}/projects/${projectId}/pages/${pageId}/panels/${panelId}/edit`, {
       method: "POST",
-      ...json({ instructions, baseImage }),
+      ...json({ instructions, baseImage, markers }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
