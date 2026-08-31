@@ -3421,6 +3421,16 @@ function ManualAdjustPad({ imageUrl, value, onChange, disabled }) {
           </div>
         )}
       </div>
+      {selection && !value && (
+        // Drawing a selection alone changes nothing (see onUp's "select" branch) — only
+        // a completed move/resize calls onChange, which is the only thing "Request edit"
+        // actually sends. Without this, it's easy to select a region, feel like you've
+        // pointed at something, and close the dialog having sent nothing at all.
+        <p className="manual-adjust-warning">
+          That's just a selection so far — drag it (or a handle on its edge) to actually
+          move or resize it, or nothing will be sent with your edit.
+        </p>
+      )}
       <button type="button" className="panel-image-action-btn" onClick={reset} disabled={disabled}>
         Reset to original
       </button>

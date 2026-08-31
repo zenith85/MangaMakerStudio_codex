@@ -2005,6 +2005,14 @@ button.primary:disabled {
   border-radius: 1px;
 }
 
+/* A heads-up, not an .error — nothing has failed, the user just hasn't finished the
+   gesture yet (see the selection-without-a-move check in ManualAdjustPad). */
+.manual-adjust-warning {
+  color: #e0a95a;
+  font-size: 12px;
+  margin: -2px 0 0;
+}
+
 .panel-image-actions {
   display: flex;
   align-items: center;
