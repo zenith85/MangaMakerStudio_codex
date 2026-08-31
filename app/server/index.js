@@ -901,7 +901,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
 app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (req, res) => {
   try {
     const { projectId, pageId, panelId } = req.params;
-    const { instructions, sceneDoc, markers, poseSketch, baseImage } = req.body;
+    const { instructions, sceneDoc, markers, poseSketch, manualReference, baseImage } = req.body;
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
@@ -947,10 +947,12 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       }));
 
     const poseSketchBuffer = decodeDataUrl(poseSketch);
+    const manualReferenceBuffer = decodeDataUrl(manualReference);
     // Panel being edited goes FIRST (clean, untouched) — buildEditPrompt tells Codex
     // that's the edit target. The marked-up copy, if any, goes SECOND, purely to point
-    // at the edit region. Everything after that is just for matching appearance, with
-    // the pose sketch (if any) always LAST — see buildEditPrompt's hasPoseSketch note.
+    // at the edit region. Everything after that is just for matching appearance, with the
+    // manual cut-and-move layout guide (if any) then the pose sketch (if any) always LAST
+    // — see buildEditPrompt's hasManualReference/hasPoseSketch notes.
     const referenceImages = [
       currentImage,
       ...(markedImage ? [markedImage] : []),
@@ -959,6 +961,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       ...objects.map((o) => loadEntityImage(projectId, "objects", o.id)).filter(Boolean),
       ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
       ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
+      ...(manualReferenceBuffer ? [manualReferenceBuffer] : []),
       ...(poseSketchBuffer ? [poseSketchBuffer] : []),
     ];
 
@@ -971,6 +974,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
       continuityPanels,
       stylePreset: page.stylePreset,
       hasMarker: !!markedImage,
+      hasManualReference: !!manualReferenceBuffer,
       hasPoseSketch: !!poseSketchBuffer,
     });
     const imageBuf = await generateImageViaCodex(projectId, null, prompt, referenceImages);

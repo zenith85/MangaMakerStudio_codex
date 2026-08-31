@@ -2831,7 +2831,7 @@ function ChooseImageModal({ title, emptyHint, items, onPick, onClose }) {
 // "Request edit" tab and EditCompareModal's "after edit chat" follow-ups, since both just
 // need "draw on this image, hand me back the marker list" — the caller owns `markers` and
 // decides what to do with them (send alongside the edit request).
-function MarkerDrawer({ imageUrl, markers, onChangeMarkers }) {
+function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
   const [tool, setTool] = useState("rect"); // "rect" | "arrow" — which shape the next drag draws
   const [aspect, setAspect] = useState(null);
   const [drawingMarker, setDrawingMarker] = useState(null); // in-progress shape, not yet finalized
@@ -2898,6 +2898,7 @@ function MarkerDrawer({ imageUrl, markers, onChangeMarkers }) {
   return (
     <>
       <div className="edit-marker-toolbar">
+        {label && <span className="edit-marker-toolbar-label">{label}</span>}
         <button
           type="button"
           className={`edit-marker-tool-btn${tool === "rect" ? " active" : ""}`}
@@ -3001,9 +3002,10 @@ function EditCompareModal({
       <div className="modal edit-compare-modal">
         <h2>Choose a version</h2>
         <p className="scene-editor-hint">
-          Click the image you want to keep{chatUrl ? "" : ", or refine the After below first"}.
+          Click the image you want to keep{chatUrl ? "" : ", or refine the After below first"} — or draw on the
+          last box to point at something for your next note.
         </p>
-        <div className={`edit-compare-grid${chatUrl ? " edit-compare-grid-3" : ""}`}>
+        <div className={`edit-compare-grid edit-compare-grid-${chatUrl ? 4 : 3}`}>
           <button type="button" className="edit-compare-option" onClick={onKeepOriginal} disabled={busy}>
             <span className="edit-compare-label">Before</span>
             <img src={beforeUrl} alt="Before edit" />
@@ -3018,6 +3020,14 @@ function EditCompareModal({
               <img src={chatUrl} alt="After edit chat refinement" />
             </button>
           )}
+          <div className="edit-compare-option edit-compare-draw">
+            <MarkerDrawer
+              imageUrl={chatUrl || afterUrl}
+              markers={chatMarkers}
+              onChangeMarkers={onChangeChatMarkers}
+              label="Point at something"
+            />
+          </div>
         </div>
         {busy && <p className="empty-hint">Saving…</p>}
 
@@ -3032,11 +3042,6 @@ function EditCompareModal({
               ))}
             </div>
           )}
-          <p className="scene-editor-hint">
-            Optionally draw on the current result below — a box for an exact spot, an
-            arrow for a direction — alongside your note, same as Request edit.
-          </p>
-          <MarkerDrawer imageUrl={chatUrl || afterUrl} markers={chatMarkers} onChangeMarkers={onChangeChatMarkers} />
           <div className="edit-chat-input-row">
             <textarea
               className="edit-chat-input"
@@ -3144,6 +3149,285 @@ function PoseSketchPad({ value, onChange, disabled }) {
   );
 }
 
+// A rough "cut and move" layout tool over the panel's own image — drag-select a region,
+// then drag inside the selection to relocate it (leaving a blank gap behind, like a
+// classic MS Paint rectangular-selection move). Sent to Codex as an extra reference image
+// alongside the edit instructions (see buildEditPrompt's hasManualReference) so something
+// drawn in the wrong place can be pointed at by roughly showing where it should end up,
+// instead of trying to describe a position in words. Deliberately left rough (blank gaps,
+// hard edges) — Codex is told this is a layout guide, not artwork to reproduce as-is.
+// The 8 classic MS Paint resize handles around a selection, positioned as percentages of
+// .manual-adjust-selection's own box (which already sits exactly over the selection rect
+// — see overlayStyle below) rather than recomputed against the canvas separately.
+const MANUAL_ADJUST_HANDLES = [
+  { key: "nw", left: "0%", top: "0%" },
+  { key: "n", left: "50%", top: "0%" },
+  { key: "ne", left: "100%", top: "0%" },
+  { key: "e", left: "100%", top: "50%" },
+  { key: "se", left: "100%", top: "100%" },
+  { key: "s", left: "50%", top: "100%" },
+  { key: "sw", left: "0%", top: "100%" },
+  { key: "w", left: "0%", top: "50%" },
+];
+
+const MANUAL_ADJUST_CURSOR_FOR_HANDLE = {
+  n: "ns-resize",
+  s: "ns-resize",
+  e: "ew-resize",
+  w: "ew-resize",
+  ne: "nesw-resize",
+  sw: "nesw-resize",
+  nw: "nwse-resize",
+  se: "nwse-resize",
+};
+
+function ManualAdjustPad({ imageUrl, value, onChange, disabled }) {
+  const canvasRef = useRef(null);
+  const [selection, setSelection] = useState(null); // { x, y, width, height } in canvas-pixel units | null
+  // Hints at what a click would currently do — a resize arrow over a handle, a grab hand
+  // over the selection body, a crosshair anywhere else. Driven by hover when idle (see
+  // onHoverMove) and pinned explicitly for the duration of a drag (see onPointerDown).
+  const [cursor, setCursor] = useState("crosshair");
+  const dragRef = useRef(null);
+
+  const loadImage = (src) => {
+    const img = new Image();
+    // Without this, drawing the panel's image (served from the backend's own origin,
+    // not the frontend's) onto the canvas taints it — getImageData/putImageData below
+    // would then throw a SecurityError on every cut/move. The backend already sends
+    // Access-Control-Allow-Origin: * (see index.js's app.use(cors())), so requesting it
+    // in CORS mode here is enough to keep the canvas readable. A plain data URL (the
+    // `value` case, reopening a prior in-progress edit) has no origin to taint with, so
+    // this is harmless there too.
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = canvasRef.current;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext("2d").drawImage(img, 0, 0);
+    };
+    img.src = src;
+  };
+
+  // Loads once on mount only — whichever cuts/moves already exist (`value`, so reopening
+  // the dialog continues where it left off) or else the panel's own clean image. Every
+  // further pixel change after that happens directly on the canvas via the imperative 2D
+  // context (see onPointerDown below), same rationale as PoseSketchPad above — this never
+  // needs to resync from props mid-session, only on Reset (which redraws explicitly).
+  useEffect(() => {
+    loadImage(value || imageUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const getPoint = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: clamp(Math.round(((e.clientX - rect.left) / rect.width) * canvas.width), 0, canvas.width),
+      y: clamp(Math.round(((e.clientY - rect.top) / rect.height) * canvas.height), 0, canvas.height),
+    };
+  };
+
+  // Canvas pixels per on-screen pixel — the canvas renders at its own intrinsic
+  // resolution but can be scaled down on screen (see .manual-adjust-canvas's
+  // max-height), so a fixed on-screen hit-test radius for the resize handles needs
+  // converting into canvas-pixel units to stay a consistent size to the eye regardless
+  // of the source image's resolution.
+  const getScale = () => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return rect.width ? canvas.width / rect.width : 1;
+  };
+
+  // What's under a point: a resize handle ("nw"/"n"/.../"w"), "move" (inside the
+  // selection but not on a handle), or null (outside it — a click there starts a fresh
+  // selection instead). Handles are checked before the interior so one always wins even
+  // though it's technically also within the selection's own bounding box.
+  const hitTest = (p, sel, scale) => {
+    if (!sel) return null;
+    const r = 9 * scale;
+    const { x, y, width: w, height: h } = sel;
+    const midX = x + w / 2;
+    const midY = y + h / 2;
+    const near = (px, py) => Math.abs(p.x - px) <= r && Math.abs(p.y - py) <= r;
+    if (near(x, y)) return "nw";
+    if (near(x + w, y)) return "ne";
+    if (near(x, y + h)) return "sw";
+    if (near(x + w, y + h)) return "se";
+    if (near(midX, y)) return "n";
+    if (near(midX, y + h)) return "s";
+    if (near(x, midY)) return "w";
+    if (near(x + w, midY)) return "e";
+    if (p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h) return "move";
+    return null;
+  };
+
+  // Live hover feedback while idle — see the `cursor` state comment above. No-ops during
+  // an active drag, since onPointerDown already pinned the cursor to whatever's dragging.
+  const onHoverMove = (e) => {
+    if (dragRef.current) return;
+    const hit = hitTest(getPoint(e), selection, getScale());
+    setCursor(hit === "move" ? "grab" : hit ? MANUAL_ADJUST_CURSOR_FOR_HANDLE[hit] : "crosshair");
+  };
+
+  const onPointerDown = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    const start = getPoint(e);
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const hit = hitTest(start, selection, getScale());
+
+    if (hit && hit !== "move") {
+      // Resizing: lift the selected pixels onto their own small canvas — putImageData is
+      // always a 1:1 pixel copy, so redrawing them at a NEW size on release needs
+      // drawImage instead, which only works from an image-like source, not raw
+      // ImageData — then blank the spot behind them, same "gap" look as a move.
+      const sel = selection;
+      const patch = ctx.getImageData(sel.x, sel.y, sel.width, sel.height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+      const base = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const patchCanvas = document.createElement("canvas");
+      patchCanvas.width = sel.width;
+      patchCanvas.height = sel.height;
+      patchCanvas.getContext("2d").putImageData(patch, 0, 0);
+      dragRef.current = { mode: "resize", handle: hit, base, patchCanvas, sel: { ...sel }, live: sel };
+      setCursor(MANUAL_ADJUST_CURSOR_FOR_HANDLE[hit]);
+    } else if (hit === "move") {
+      // Moving: lift the selected pixels, blank the spot behind them (white — same "gap"
+      // look the rest of this tool leaves), then follow the pointer with the lifted patch
+      // until release, when it's stamped down for good.
+      const sel = selection;
+      const patch = ctx.getImageData(sel.x, sel.y, sel.width, sel.height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+      const base = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      dragRef.current = { mode: "move", base, patch, sel, offset: { x: start.x - sel.x, y: start.y - sel.y } };
+      setCursor("grabbing");
+    } else {
+      dragRef.current = { mode: "select", start };
+      setSelection({ x: start.x, y: start.y, width: 0, height: 0 });
+      setCursor("crosshair");
+    }
+
+    const onMove = (ev) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const p = getPoint(ev);
+      if (d.mode === "select") {
+        d.last = {
+          x: Math.min(d.start.x, p.x),
+          y: Math.min(d.start.y, p.y),
+          width: Math.abs(p.x - d.start.x),
+          height: Math.abs(p.y - d.start.y),
+        };
+        setSelection(d.last);
+      } else if (d.mode === "move") {
+        const nx = clamp(p.x - d.offset.x, 0, canvas.width - d.sel.width);
+        const ny = clamp(p.y - d.offset.y, 0, canvas.height - d.sel.height);
+        ctx.putImageData(d.base, 0, 0);
+        ctx.putImageData(d.patch, nx, ny);
+        d.sel = { ...d.sel, x: nx, y: ny };
+      } else {
+        // Resizing: each edge in the handle's name (e.g. "sw" = south + west) moves that
+        // one side of the rect toward the pointer while the OPPOSITE side stays put, same
+        // as dragging a Paint selection handle — a plain string search covers all 8
+        // combinations since a handle only ever names one vertical + one horizontal side.
+        const MIN = 6; // canvas px — small but never lets a handle collapse the rect to nothing
+        let { x, y, width, height } = d.sel;
+        if (d.handle.includes("e")) width = clamp(p.x - d.sel.x, MIN, canvas.width - d.sel.x);
+        if (d.handle.includes("s")) height = clamp(p.y - d.sel.y, MIN, canvas.height - d.sel.y);
+        if (d.handle.includes("w")) {
+          const right = d.sel.x + d.sel.width;
+          x = clamp(p.x, 0, right - MIN);
+          width = right - x;
+        }
+        if (d.handle.includes("n")) {
+          const bottom = d.sel.y + d.sel.height;
+          y = clamp(p.y, 0, bottom - MIN);
+          height = bottom - y;
+        }
+        d.live = { x, y, width, height };
+        ctx.putImageData(d.base, 0, 0);
+        ctx.drawImage(d.patchCanvas, 0, 0, d.patchCanvas.width, d.patchCanvas.height, x, y, width, height);
+        setSelection(d.live);
+      }
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const d = dragRef.current;
+      dragRef.current = null;
+      if (!d) return;
+      if (d.mode === "select") {
+        // A stray click leaves a near-zero-size box — treat that as a deselect rather
+        // than a meaningless sliver selection.
+        const m = d.last;
+        setSelection(m && m.width > 3 && m.height > 3 ? m : null);
+      } else {
+        setSelection(d.mode === "move" ? d.sel : d.live);
+        // Only a move/resize actually changes any pixels, so only those are worth
+        // reporting up — drawing (or clearing) a selection alone leaves the image
+        // untouched.
+        onChange(canvas.toDataURL("image/png"));
+      }
+      setCursor("crosshair");
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const reset = () => {
+    setSelection(null);
+    setCursor("crosshair");
+    loadImage(imageUrl);
+    onChange(null);
+  };
+
+  const canvas = canvasRef.current;
+  const overlayStyle =
+    selection && canvas
+      ? {
+          left: `${(selection.x / canvas.width) * 100}%`,
+          top: `${(selection.y / canvas.height) * 100}%`,
+          width: `${(selection.width / canvas.width) * 100}%`,
+          height: `${(selection.height / canvas.height) * 100}%`,
+        }
+      : null;
+
+  return (
+    <div className="manual-adjust-pad">
+      <p className="scene-editor-hint">
+        Drag to select a region, then drag inside it to move — or drag a handle on its edge
+        to resize. The blank gaps left behind are fine — Codex only uses this to see where
+        things should end up.
+      </p>
+      <div className="manual-adjust-canvas-box">
+        <canvas
+          ref={canvasRef}
+          className="manual-adjust-canvas"
+          style={{ cursor }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onHoverMove}
+        />
+        {overlayStyle && (
+          <div className="manual-adjust-selection" style={overlayStyle}>
+            {MANUAL_ADJUST_HANDLES.map((h) => (
+              <div key={h.key} className="manual-adjust-handle" style={{ left: h.left, top: h.top }} />
+            ))}
+          </div>
+        )}
+      </div>
+      <button type="button" className="panel-image-action-btn" onClick={reset} disabled={disabled}>
+        Reset to original
+      </button>
+    </div>
+  );
+}
+
 function PanelEditor({
   projectId,
   page,
@@ -3206,6 +3490,12 @@ function PanelEditor({
   // saved to the panel itself, only used for the next generate/edit call — see PoseSketchPad.
   const [poseSketch, setPoseSketch] = useState(null); // data URL | null
   const [showPoseSketch, setShowPoseSketch] = useState(false);
+  // A rough cut-and-move layout guide over the panel's CURRENT image (see ManualAdjustPad)
+  // — Edit image tab only, since it needs an existing image to cut from. Same ephemeral
+  // lifetime as poseSketch: sent alongside the next "Request edit" call, never saved to
+  // the panel itself (see buildEditPrompt's hasManualReference).
+  const [manualRef, setManualRef] = useState(null); // data URL | null
+  const [showManualAdjust, setShowManualAdjust] = useState(false);
   // "Reference last page" (Scene tab only, next to Pose reference) — when on, the next
   // Generate/Regenerate hands Codex a small composite of every panel on the PREVIOUS
   // page as extra context, so it can match the established setting/lighting/character
@@ -3379,7 +3669,7 @@ function PanelEditor({
     setEditBusy(true);
     setEditError("");
     try {
-      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarkers, poseSketch);
+      const blob = await api.requestPanelEdit(projectId, page.id, panel.id, editDoc, editMarkers, poseSketch, manualRef);
       if (editCandidate) URL.revokeObjectURL(editCandidate.url);
       setEditCandidate({ blob, url: URL.createObjectURL(blob) });
       // A fresh edit request starts a new refinement session — any chat candidate from
@@ -3953,6 +4243,9 @@ function PanelEditor({
           <button type="button" className="panel-image-action-btn" onClick={() => setShowPoseSketch(true)}>
             {poseSketch ? "✓ Pose reference drawn — edit" : "+ Draw pose reference"}
           </button>
+          <button type="button" className="panel-image-action-btn" onClick={() => setShowManualAdjust(true)}>
+            {manualRef ? "✓ Manual adjust reference — edit" : "+ Manual adjust reference"}
+          </button>
 
           <button
             className="primary"
@@ -4271,6 +4564,24 @@ function PanelEditor({
           <PoseSketchPad value={poseSketch} onChange={setPoseSketch} />
           <div className="modal-actions">
             <button type="button" onClick={() => setShowPoseSketch(false)}>
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {showManualAdjust && (
+      <div className="modal-backdrop" onClick={() => setShowManualAdjust(false)}>
+        <div className="modal manual-adjust-modal" onClick={(e) => e.stopPropagation()}>
+          <h2>Manual adjust reference</h2>
+          <p>
+            Cut a piece of the current image and drag it where it should actually be — a
+            rough layout guide for Codex, not a final edit.
+          </p>
+          <ManualAdjustPad imageUrl={panel.imageUrl} value={manualRef} onChange={setManualRef} />
+          <div className="modal-actions">
+            <button type="button" onClick={() => setShowManualAdjust(false)}>
               Done
             </button>
           </div>

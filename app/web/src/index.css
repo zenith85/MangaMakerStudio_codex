@@ -904,8 +904,20 @@ button {
 
 .edit-marker-toolbar {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin-bottom: 8px;
+}
+
+/* Pushes the Box/Arrow buttons to the right, keeping the label on the same row instead
+   of stacked above it — see MarkerDrawer's optional `label` prop. */
+.edit-marker-toolbar-label {
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
 }
 
 .edit-marker-tool-btn {
@@ -985,8 +997,8 @@ button {
    back — wider than the default .modal so two full-size images actually fit side by side
    instead of the small thumbnails this replaced. */
 .edit-compare-modal {
-  width: 1040px;
-  max-width: 94vw;
+  width: 1440px;
+  max-width: 96vw;
 }
 
 .edit-compare-grid {
@@ -996,13 +1008,21 @@ button {
   margin-top: 14px;
 }
 
-/* Once a chat refinement exists, a third "After edit chat" column joins Before/After —
-   narrower image height than the 2-up layout so 3 side by side don't get cramped. */
+/* A "Point at something" drawing column sits alongside Before/After (and After edit
+   chat, once it exists) in the SAME row — always one more column than there are
+   decision images, so the draw tool never ends up stranded below the row it belongs
+   next to. It gets a bigger share of the row than the plain decision thumbnails (which
+   only need to be looked at, not precisely drawn on) so there's actually room to draw. */
 .edit-compare-grid-3 {
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1.6fr;
 }
 
-.edit-compare-grid-3 .edit-compare-option img {
+.edit-compare-grid-4 {
+  grid-template-columns: 1fr 1fr 1fr 1.6fr;
+}
+
+.edit-compare-grid-3 .edit-compare-option img,
+.edit-compare-grid-4 .edit-compare-option img {
   height: 40vh;
 }
 
@@ -1020,6 +1040,16 @@ button {
   font: inherit;
   color: inherit;
   cursor: pointer;
+}
+
+/* The draw column is a plain div, not a button — drawing on it isn't a decision, so it
+   shouldn't look clickable like Before/After/Chat do. */
+.edit-compare-draw {
+  cursor: default;
+}
+
+.edit-compare-draw .edit-marker-box {
+  max-width: none;
 }
 
 .edit-compare-option img {
@@ -1904,6 +1934,75 @@ button.primary:disabled {
   border-radius: 8px;
   cursor: crosshair;
   touch-action: none;
+}
+
+/* Wider than the default .modal (like .edit-compare-modal) so the cut/move canvas has
+   real room to work in — a 380px dialog is too cramped to drag pieces around precisely. */
+.manual-adjust-modal {
+  width: 720px;
+  max-width: 96vw;
+}
+
+.manual-adjust-pad {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin: 12px 0 14px;
+}
+
+/* inline-block + a canvas-only child so this shrink-wraps to EXACTLY the canvas's own
+   rendered box (a replaced element, sized below via max-width/max-height like an <img>,
+   preserves its intrinsic aspect ratio with no letterbox gap) — .manual-adjust-selection
+   below is positioned in percentages of this box, which only lines up with actual canvas
+   pixels if the box has no extra space around the canvas. */
+.manual-adjust-canvas-box {
+  position: relative;
+  display: inline-block;
+  /* Without this, .manual-adjust-pad's align-items: stretch would force this box to the
+     full flex-item width regardless of the canvas's own (possibly smaller) rendered size
+     — leaving empty space the percentage-based .manual-adjust-selection overlay would
+     then misalign against. */
+  align-self: flex-start;
+  max-width: 100%;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  line-height: 0;
+}
+
+.manual-adjust-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  /* Cursor is set inline (see ManualAdjustPad's `cursor` state) — it switches between
+     crosshair/grab/grabbing/resize-arrows depending on hover and drag state, which a
+     static rule here can't express. */
+  touch-action: none;
+}
+
+/* Dashed outline over the current cut/move/resize selection — a separate
+   absolutely-positioned layer rather than drawn onto the canvas itself, same reasoning as
+   .edit-marker-rect: it must never end up baked into the actual pixels sent to Codex. */
+.manual-adjust-selection {
+  position: absolute;
+  border: 2px dashed #4a5cff;
+  background: rgba(74, 92, 255, 0.12);
+  pointer-events: none;
+}
+
+/* The 8 classic Paint-style resize handles (see MANUAL_ADJUST_HANDLES in App.jsx) — purely
+   visual, positioned at each corner/edge of .manual-adjust-selection; pointer-events stay
+   off here too, since ManualAdjustPad hit-tests the same positions itself against the
+   canvas's own pointer events rather than relying on these divs to catch anything. */
+.manual-adjust-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -5px 0 0 -5px;
+  background: #fff;
+  border: 1px solid #4a5cff;
+  border-radius: 1px;
 }
 
 .panel-image-actions {

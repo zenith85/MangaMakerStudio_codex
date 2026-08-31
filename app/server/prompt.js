@@ -119,9 +119,13 @@ export function buildPrompt({
 // matching appearance.
 // hasPoseSketch: like buildPrompt above, the caller (index.js's /edit route) always
 // appends the pose sketch, when present, as the very LAST reference image — after the
-// marker copy (if any) and every entity reference image — so "the LAST attached
-// reference image" stays unambiguous regardless of how many other references are
-// attached.
+// marker copy (if any), every entity reference image, and the manual layout guide (if
+// any) — so "the LAST attached reference image" stays unambiguous regardless of how many
+// other references are attached.
+// hasManualReference: same idea, for the cut-and-move layout guide from ManualAdjustPad
+// (see App.jsx) — always appended right before the pose sketch, so it's LAST when there's
+// no pose sketch, or SECOND-TO-LAST when there is (same ordinal trick as buildPrompt's
+// hasLastPageThumbnail/hasPoseSketch above).
 export function buildEditPrompt({
   instructions,
   characters = [],
@@ -131,6 +135,7 @@ export function buildEditPrompt({
   continuityPanels = [],
   stylePreset,
   hasMarker = false,
+  hasManualReference = false,
   hasPoseSketch = false,
 }) {
   const entityParts = describeReferencedEntities({ characters, places, objects, references, continuityPanels });
@@ -150,6 +155,12 @@ export function buildEditPrompt({
     const afterNth = hasMarker ? "first two" : "first";
     parts.push(`Any OTHER attached reference images (after the ${afterNth}) are only for matching these, not additional edit targets:`);
     parts.push(...entityParts);
+  }
+  if (hasManualReference) {
+    const ordinal = hasPoseSketch ? "SECOND-TO-LAST" : "LAST";
+    parts.push(
+      `The ${ordinal} attached reference image is a rough manual layout guide: pieces of the original panel were cut and dragged to new positions to show where they should actually end up. Ignore the blank white gaps and rough hard edges — those are not part of the artwork. Redraw the affected element(s) fully and normally in the position(s) shown there, not as a cut-and-pasted collage.`
+    );
   }
   if (hasPoseSketch) {
     parts.push(
