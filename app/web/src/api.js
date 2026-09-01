@@ -65,6 +65,7 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/pdf`, { method: "POST", body: formData }),
   saveProjectPdf: (projectId, formData) => req(`/projects/${projectId}/pdf`, { method: "POST", body: formData }),
   saveProjectCbz: (projectId, formData) => req(`/projects/${projectId}/cbz`, { method: "POST", body: formData }),
+  saveProjectEpub: (projectId, formData) => req(`/projects/${projectId}/epub`, { method: "POST", body: formData }),
   openProjectFile: (projectId, relativePath) =>
     req(`/projects/${projectId}/open-file`, { method: "POST", ...json({ relativePath }) }),
   // Returns a Blob (raw image bytes), not JSON like everything above — the edit

@@ -656,6 +656,129 @@ function patchPanelInPage(page, panelId, updater) {
   return { ...page, floatingPanels: (page.floatingPanels || []).map((p) => (p.id === panelId ? updater(p) : p)) };
 }
 
+const escapeXml = (str) =>
+  String(str).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&apos;", '"': "&quot;" }[c]));
+
+// Assembles a fixed-layout EPUB3 (plus an EPUB2 toc.ncx, for older readers that don't
+// understand nav.xhtml) from already-rendered page images — see exportAllPagesEpub
+// above, which is the only caller. Same "client builds the whole file, server just
+// persists the bytes" split as the PDF/CBZ exports use. Each page gets its own
+// full-bleed XHTML file sized to that page's own pixel dimensions — fixed layout, so a
+// reader displays comic art at native size/aspect instead of reflowing it like prose.
+function buildEpub(pages, title) {
+  const zip = new JSZip();
+  const bookId = `urn:uuid:${crypto.randomUUID()}`;
+  const pad = (n) => String(n).padStart(3, "0");
+
+  // Must be the very FIRST entry in the zip, stored uncompressed — that's how a reader
+  // recognizes an EPUB from its opening bytes before parsing anything else.
+  zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+
+  zip.file(
+    "META-INF/container.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+  );
+
+  const manifestItems = pages
+    .map(
+      (p, i) =>
+        `    <item id="page${i + 1}" href="page-${pad(i + 1)}.xhtml" media-type="application/xhtml+xml"/>\n` +
+        `    <item id="img${i + 1}" href="images/page-${pad(i + 1)}.png" media-type="image/png"/>`
+    )
+    .join("\n");
+  const spineItems = pages.map((_, i) => `    <itemref idref="page${i + 1}"/>`).join("\n");
+
+  zip.file(
+    "OEBPS/content.opf",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="BookId">${bookId}</dc:identifier>
+    <dc:title>${escapeXml(title)}</dc:title>
+    <dc:language>en</dc:language>
+    <meta property="rendition:layout">pre-paginated</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+${manifestItems}
+  </manifest>
+  <spine toc="ncx">
+${spineItems}
+  </spine>
+</package>`
+  );
+
+  const label = (p, i) => escapeXml(p.title || `Page ${i + 1}`);
+  const navItems = pages.map((p, i) => `      <li><a href="page-${pad(i + 1)}.xhtml">${label(p, i)}</a></li>`).join("\n");
+  zip.file(
+    "OEBPS/nav.xhtml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Contents</title></head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <ol>
+${navItems}
+    </ol>
+  </nav>
+</body>
+</html>`
+  );
+
+  const navPoints = pages
+    .map(
+      (p, i) =>
+        `    <navPoint id="navPoint-${i + 1}" playOrder="${i + 1}">\n` +
+        `      <navLabel><text>${label(p, i)}</text></navLabel>\n` +
+        `      <content src="page-${pad(i + 1)}.xhtml"/>\n` +
+        `    </navPoint>`
+    )
+    .join("\n");
+  zip.file(
+    "OEBPS/toc.ncx",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="${bookId}"/>
+    <meta name="dtb:depth" content="1"/>
+  </head>
+  <docTitle><text>${escapeXml(title)}</text></docTitle>
+  <navMap>
+${navPoints}
+  </navMap>
+</ncx>`
+  );
+
+  pages.forEach((p, i) => {
+    const n = pad(i + 1);
+    zip.file(`OEBPS/images/page-${n}.png`, p.blob);
+    zip.file(
+      `OEBPS/page-${n}.xhtml`,
+      `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>${label(p, i)}</title>
+  <meta name="viewport" content="width=${p.width}, height=${p.height}"/>
+  <style>html,body{margin:0;padding:0;}img{width:100%;height:100%;display:block;}</style>
+</head>
+<body>
+  <img src="images/page-${n}.png" alt="${label(p, i)}"/>
+</body>
+</html>`
+    );
+  });
+
+  return zip.generateAsync({ type: "blob" });
+}
+
 export default function App() {
   const [theme, toggleTheme] = useTheme();
   const [projects, setProjects] = useState(null); // null = not loaded yet
@@ -674,6 +797,9 @@ export default function App() {
   const [cbzBusy, setCbzBusy] = useState(false);
   const [cbzStatus, setCbzStatus] = useState("");
   const [cbzSavedPath, setCbzSavedPath] = useState("");
+  const [epubBusy, setEpubBusy] = useState(false);
+  const [epubStatus, setEpubStatus] = useState("");
+  const [epubSavedPath, setEpubSavedPath] = useState("");
   const [translateBusy, setTranslateBusy] = useState(false);
   const [translateError, setTranslateError] = useState("");
   const pageCanvasRef = useRef(null);
@@ -710,6 +836,14 @@ export default function App() {
       await api.openProjectFile(currentProjectId, cbzSavedPath);
     } catch (err) {
       setCbzStatus(`Failed: ${err.message}`);
+    }
+  };
+
+  const openSavedEpub = async () => {
+    try {
+      await api.openProjectFile(currentProjectId, epubSavedPath);
+    } catch (err) {
+      setEpubStatus(`Failed: ${err.message}`);
     }
   };
 
@@ -1097,6 +1231,53 @@ export default function App() {
     }
   };
 
+  // Same per-page capture loop as exportAllPagesCbz, but assembles a proper fixed-layout
+  // EPUB (see buildEpub below) instead of a plain zip — needs each page's pixel
+  // dimensions too, since a fixed-layout EPUB page is sized to its own image rather than
+  // reflowing like prose.
+  const exportAllPagesEpub = async () => {
+    const hadSelection = selectedPanelId;
+    const hadPageId = currentPage?.id;
+    setSelectedPanelId(null);
+
+    setEpubBusy(true);
+    setEpubStatus("");
+    setEpubSavedPath("");
+    const freshPages = pages.map((p) => (p.id === currentPage?.id ? currentPage : p));
+    try {
+      const captured = [];
+      for (const page of freshPages) {
+        setCurrentPage(page);
+        await new Promise((r) => setTimeout(r, 50));
+
+        const restoreImages = await precropPanelImages(pageCanvasRef.current);
+        const restoreBubbles = precropBubbleOutlines(pageCanvasRef.current, page);
+        const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
+        restoreImages();
+        restoreBubbles();
+
+        const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        captured.push({ blob: pngBlob, width: canvas.width, height: canvas.height, title: page.title });
+      }
+
+      if (captured.length === 0) throw new Error("no pages to export");
+      const projectName = projects?.find((p) => p.id === currentProjectId)?.name || "Manga";
+      const blob = await buildEpub(captured, projectName);
+      const formData = new FormData();
+      formData.append("epub", blob, "book.epub");
+      const result = await api.saveProjectEpub(currentProjectId, formData);
+      setEpubStatus(`Saved as ${result.filename}`);
+      setEpubSavedPath(result.filename);
+    } catch (err) {
+      setEpubStatus(`Failed: ${err.message}`);
+    } finally {
+      const restored = freshPages.find((p) => p.id === hadPageId);
+      setCurrentPage(restored || null);
+      setEpubBusy(false);
+      if (hadSelection) setSelectedPanelId(hadSelection);
+    }
+  };
+
   // Switching to a layout with fewer panels drops the trailing ones (grid position
   // comes from array order — see PageCanvas), so warn first if any would be lost.
   const changeLayout = async (layoutValue) => {
@@ -1243,6 +1424,7 @@ export default function App() {
           onExportPdf={exportPagePdf}
           onExportAllPdf={exportAllPagesPdf}
           onExportAllCbz={exportAllPagesCbz}
+          onExportAllEpub={exportAllPagesEpub}
           pdfBusy={pdfBusy}
           pdfStatus={pdfStatus}
           pdfSavedPath={pdfSavedPath}
@@ -1251,6 +1433,10 @@ export default function App() {
           cbzStatus={cbzStatus}
           cbzSavedPath={cbzSavedPath}
           onOpenSavedCbz={openSavedCbz}
+          epubBusy={epubBusy}
+          epubStatus={epubStatus}
+          epubSavedPath={epubSavedPath}
+          onOpenSavedEpub={openSavedEpub}
           onChangeLanguage={changeLanguage}
           translateBusy={translateBusy}
           translateError={translateError}
@@ -1923,6 +2109,7 @@ function PageBar({
   onExportPdf,
   onExportAllPdf,
   onExportAllCbz,
+  onExportAllEpub,
   pdfBusy,
   pdfStatus,
   pdfSavedPath,
@@ -1931,6 +2118,10 @@ function PageBar({
   cbzStatus,
   cbzSavedPath,
   onOpenSavedCbz,
+  epubBusy,
+  epubStatus,
+  epubSavedPath,
+  onOpenSavedEpub,
   onChangeLanguage,
   translateBusy,
   translateError,
@@ -2083,7 +2274,7 @@ function PageBar({
               <button
                 type="button"
                 className="page-menu-item"
-                disabled={pdfBusy || cbzBusy}
+                disabled={pdfBusy || cbzBusy || epubBusy}
                 onClick={() => {
                   setShowMenu(false);
                   onExportPdf();
@@ -2096,7 +2287,7 @@ function PageBar({
               <button
                 type="button"
                 className="page-menu-item"
-                disabled={pdfBusy || cbzBusy}
+                disabled={pdfBusy || cbzBusy || epubBusy}
                 onClick={() => {
                   setShowMenu(false);
                   onExportAllPdf();
@@ -2109,13 +2300,26 @@ function PageBar({
               <button
                 type="button"
                 className="page-menu-item"
-                disabled={pdfBusy || cbzBusy}
+                disabled={pdfBusy || cbzBusy || epubBusy}
                 onClick={() => {
                   setShowMenu(false);
                   onExportAllCbz();
                 }}
               >
                 {cbzBusy ? "Saving CBZ…" : "Export all pages as CBZ"}
+              </button>
+            )}
+            {pages.length > 1 && (
+              <button
+                type="button"
+                className="page-menu-item"
+                disabled={pdfBusy || cbzBusy || epubBusy}
+                onClick={() => {
+                  setShowMenu(false);
+                  onExportAllEpub();
+                }}
+              >
+                {epubBusy ? "Saving EPUB…" : "Export all pages as EPUB"}
               </button>
             )}
             {currentPage && (
@@ -2153,6 +2357,14 @@ function PageBar({
       )}
       {cbzSavedPath && (
         <button className="pdf-open-button" onClick={onOpenSavedCbz}>
+          Open
+        </button>
+      )}
+      {epubStatus && (
+        <span className={`pdf-status${epubStatus.startsWith("Failed") ? " pdf-status-error" : ""}`}>{epubStatus}</span>
+      )}
+      {epubSavedPath && (
+        <button className="pdf-open-button" onClick={onOpenSavedEpub}>
           Open
         </button>
       )}

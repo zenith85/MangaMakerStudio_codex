@@ -771,6 +771,22 @@ app.post("/api/projects/:projectId/cbz", upload.single("cbz"), (req, res) => {
   res.json({ ok: true, filename });
 });
 
+// Saves every page of the project as one fixed-layout EPUB (a full valid EPUB3
+// container — mimetype/container.xml/content.opf/nav/toc.ncx/page images — built
+// client-side, see buildEpub in App.jsx), living at the project's root next to the
+// equivalent all-pages PDF/CBZ. Same "client builds the whole file, server just
+// persists the bytes" split as those two.
+app.post("/api/projects/:projectId/epub", upload.single("epub"), (req, res) => {
+  const { projectId } = req.params;
+  const project = getProject(projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  if (!req.file) return res.status(400).json({ error: "epub is required" });
+
+  const filename = `${slugifyTitle(project.name)}.epub`;
+  fs.writeFileSync(path.join(PROJECTS_DIR, projectId, filename), req.file.buffer);
+  res.json({ ok: true, filename });
+});
+
 // Reveals an arbitrary file saved somewhere under this project's folder — currently used
 // for the "open" button shown right after a PDF export finishes (both the per-page and
 // all-pages ones), so there's a way to jump straight to what was just saved instead of
