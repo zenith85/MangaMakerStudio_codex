@@ -987,6 +987,18 @@ export default function App() {
     api.updatePanel(currentProjectId, currentPage.id, panelId, { imageOffset });
   };
 
+  // Dropping an image file straight onto a panel on the page itself — same upload this
+  // panel's own Canvas tab offers (see PanelEditor's uploadImage), just without having to
+  // open the editor and switch to that tab first. Works whether or not the panel already
+  // has an image; dropping just replaces it, exactly like that tab's drop zone does.
+  const uploadPanelImageDropped = async (panelId, file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const formData = new FormData();
+    formData.append("image", file);
+    await api.uploadPanelImage(currentProjectId, currentPage.id, panelId, formData);
+    await refreshCurrentPage();
+  };
+
   // Generic live-preview patch (no network call) — used by the panel editor sidebar's
   // zoom slider so the canvas visibly updates while dragging, not just once it's
   // released. Mirrors dragPanelImage above; that one's offset-specific, this one isn't
@@ -1068,6 +1080,12 @@ export default function App() {
     const page = await api.createPage(currentProjectId, { title, layout, stylePreset, panelCount });
     await refreshPages(currentProjectId);
     setCurrentPage(page);
+  };
+
+  const renamePage = async (pageId, title) => {
+    const updated = await api.updatePage(currentProjectId, pageId, { title });
+    setPages((prev) => prev.map((p) => (p.id === pageId ? updated : p)));
+    if (currentPage?.id === pageId) setCurrentPage(updated);
   };
 
   const deletePage = async (pageId) => {
@@ -1420,6 +1438,7 @@ export default function App() {
           onCreate={createPage}
           onChangeLayout={changeLayout}
           onDelete={deletePage}
+          onRename={renamePage}
           onAddFloatingPanel={addFloatingPanel}
           onExportPdf={exportPagePdf}
           onExportAllPdf={exportAllPagesPdf}
@@ -1459,6 +1478,7 @@ export default function App() {
               onSelect={setSelectedPanelId}
               onDragImage={dragPanelImage}
               onDragImageEnd={commitPanelImage}
+              onDropImage={uploadPanelImageDropped}
               customFonts={customFonts}
               lang={currentPage.language || "en"}
               onBubblesLive={updateBubblesLive}
@@ -2105,6 +2125,7 @@ function PageBar({
   onCreate,
   onChangeLayout,
   onDelete,
+  onRename,
   onAddFloatingPanel,
   onExportPdf,
   onExportAllPdf,
@@ -2172,6 +2193,27 @@ function PageBar({
     setShowLayoutPicker(false);
   };
 
+  // One-click page add — skips the title/layout/style form entirely, naming the page
+  // after its own position in the book (so it reads "3" for the 3rd page regardless of
+  // what earlier pages happen to be titled) and carrying over the CURRENT page's
+  // layout/style so a run of quick-added pages stays visually consistent with the book
+  // rather than resetting to the form's hardcoded defaults every time.
+  const quickAddPage = () => {
+    onCreate({
+      title: String(pages.length + 1),
+      layout: currentPage?.layout || "grid-2x2",
+      stylePreset: currentPage?.stylePreset || "manga_bw",
+    });
+  };
+
+  const renamePageTitle = () => {
+    if (!currentPage) return;
+    const next = window.prompt("Rename page", currentPage.title);
+    if (next != null && next.trim() && next.trim() !== currentPage.title) {
+      onRename(currentPage.id, next.trim());
+    }
+  };
+
   return (
     <div className="page-bar">
       {currentPage && (
@@ -2218,6 +2260,16 @@ function PageBar({
           </option>
         ))}
       </select>
+
+      <button
+        type="button"
+        className="page-menu-trigger"
+        onClick={quickAddPage}
+        title="Add a new page, named for its position in the book"
+        aria-label="Add a new page"
+      >
+        +
+      </button>
 
       <div className="page-menu-wrap" ref={menuRef}>
         <button
@@ -2268,6 +2320,18 @@ function PageBar({
                 }}
               >
                 Change layout
+              </button>
+            )}
+            {currentPage && (
+              <button
+                type="button"
+                className="page-menu-item"
+                onClick={() => {
+                  setShowMenu(false);
+                  renamePageTitle();
+                }}
+              >
+                Rename page
               </button>
             )}
             {currentPage && (
@@ -2439,6 +2503,7 @@ function PageCanvas({
   onSelect,
   onDragImage,
   onDragImageEnd,
+  onDropImage,
   customFonts,
   lang,
   onBubblesLive,
@@ -2485,6 +2550,7 @@ function PageCanvas({
       onSelect={onSelect}
       onDragImage={onDragImage}
       onDragImageEnd={onDragImageEnd}
+      onDropImage={onDropImage}
       customFonts={customFonts}
       lang={lang}
       onBubblesLive={onBubblesLive}
@@ -2560,6 +2626,7 @@ function PageCanvas({
           onSelect={onSelect}
           onDragImage={onDragImage}
           onDragImageEnd={onDragImageEnd}
+          onDropImage={onDropImage}
           customFonts={customFonts}
           lang={lang}
           onBubblesLive={onBubblesLive}
@@ -2621,6 +2688,7 @@ function PanelThumb({
   onSelect,
   onDragImage,
   onDragImageEnd,
+  onDropImage,
   onBubblesLive,
   onBubblesCommit,
   onExpressionsLive,
@@ -2634,6 +2702,12 @@ function PanelThumb({
 }) {
   const imgRef = useRef(null);
   const containerRef = useRef(null);
+  // Highlights the panel while a file is being dragged over it — dragenter/dragleave
+  // fire on every child element too as the pointer crosses them, so a plain counter
+  // (rather than a boolean flipped on enter/leave) avoids the highlight flickering off
+  // whenever the drag passes over a bubble/handle sitting on top of the panel.
+  const dragCounter = useRef(0);
+  const [dragOver, setDragOver] = useState(false);
   const dragRef = useRef(null);
   const [frameSize, setFrameSize] = useState({ w: 0, h: 0 });
   const [natural, setNatural] = useState(null);
@@ -2868,12 +2942,41 @@ function PanelThumb({
     else onSelect(panel.id);
   };
 
+  // Dropping an image file from the OS directly onto the panel — same upload as the
+  // Canvas tab's drop zone (see PanelEditor's onImageDrop), just reachable without
+  // opening the editor first. Native HTML5 drag events, entirely separate from the
+  // pointer-based pan/crop drag above, so the two never conflict on the same box.
+  const onDragEnter = (e) => {
+    e.preventDefault();
+    dragCounter.current += 1;
+    setDragOver(true);
+  };
+  const onDragLeave = (e) => {
+    e.preventDefault();
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setDragOver(false);
+    }
+  };
+  const onFileDrop = (e) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) onDropImage(panel.id, file);
+  };
+
   return (
     <div
       ref={containerRef}
-      className={`panel-slot ${selected ? "selected" : ""} ${panel.hasImage ? "has-image" : ""} ${floating ? "floating" : ""}`}
+      className={`panel-slot ${selected ? "selected" : ""} ${panel.hasImage ? "has-image" : ""} ${floating ? "floating" : ""} ${dragOver ? "drag-over" : ""}`}
       style={clipPath ? { ...slotStyle, clipPath } : slotStyle}
       onPointerDown={onPointerDown}
+      onDragEnter={onDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={onDragLeave}
+      onDrop={onFileDrop}
     >
       {floating && selected && (
         <button

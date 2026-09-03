@@ -722,6 +722,15 @@ button {
   border-color: #4a5cff;
 }
 
+/* Dragging a file from the OS over a panel (see PanelThumb's onDragEnter/onDrop) — a
+   dashed border distinguishes this from .selected's solid one, since both can be true
+   at once (dragging a replacement image onto the currently-selected panel). */
+.panel-slot.drag-over .panel-slot-image-layer {
+  border-color: #4a5cff;
+  border-style: dashed;
+  background: rgba(74, 92, 255, 0.1);
+}
+
 .panel-slot img {
   width: 100%;
   height: 100%;

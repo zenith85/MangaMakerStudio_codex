@@ -520,7 +520,10 @@ app.patch("/api/projects/:projectId/pages/:pageId", (req, res) => {
   const page = pages.find((p) => p.id === pageId);
   if (!page) return res.status(404).json({ error: "page not found" });
 
-  const { layout, panelCount, gridColumns, gridRows, language } = req.body;
+  const { title, layout, panelCount, gridColumns, gridRows, language } = req.body;
+  // Trimmed and ignored-if-empty rather than a 400 — a rename that clears the field back
+  // out shouldn't be treated as an error, just a no-op that leaves the old title in place.
+  if (typeof title === "string" && title.trim()) page.title = title.trim();
   // Which language's text every bubble on this page currently displays/edits — "en" (or
   // absent) is the original; switching to a translated language never touches bubble.text
   // itself (see the /translate route), so this alone is enough to flip back instantly.
