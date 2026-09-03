@@ -63,6 +63,8 @@ export const api = {
     req(`/projects/${projectId}/pages/${pageId}/panels/${panelId}/open-image`, { method: "POST" }),
   savePagePdf: (projectId, pageId, formData) =>
     req(`/projects/${projectId}/pages/${pageId}/pdf`, { method: "POST", body: formData }),
+  savePageCbz: (projectId, pageId, formData) =>
+    req(`/projects/${projectId}/pages/${pageId}/cbz`, { method: "POST", body: formData }),
   saveProjectPdf: (projectId, formData) => req(`/projects/${projectId}/pdf`, { method: "POST", body: formData }),
   saveProjectCbz: (projectId, formData) => req(`/projects/${projectId}/cbz`, { method: "POST", body: formData }),
   saveProjectEpub: (projectId, formData) => req(`/projects/${projectId}/epub`, { method: "POST", body: formData }),

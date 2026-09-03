@@ -1142,6 +1142,46 @@ export default function App() {
     }
   };
 
+  // Same per-page capture as exportPagePdf, but zips the single page image into a
+  // one-image CBZ instead — mostly for symmetry with "Save as PDF" right next to it in
+  // the menu, since a one-page CBZ isn't something you'd normally want on its own.
+  // Shares cbzBusy/cbzStatus/cbzSavedPath with exportAllPagesCbz below, same as
+  // exportPagePdf shares pdfBusy/pdfStatus/pdfSavedPath with exportAllPagesPdf.
+  const exportPageCbz = async () => {
+    const hadSelection = selectedPanelId;
+    setSelectedPanelId(null);
+    await new Promise((r) => setTimeout(r, 50));
+
+    setCbzBusy(true);
+    setCbzStatus("");
+    setCbzSavedPath("");
+    let restoreImages = () => {};
+    let restoreBubbles = () => {};
+    try {
+      restoreImages = await precropPanelImages(pageCanvasRef.current);
+      restoreBubbles = precropBubbleOutlines(pageCanvasRef.current, currentPage);
+      const canvas = await html2canvas(pageCanvasRef.current, { backgroundColor: "#1c1d24", scale: 2 });
+      const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+
+      const zip = new JSZip();
+      zip.file("page-001.png", pngBlob);
+      const blob = await zip.generateAsync({ type: "blob" });
+
+      const formData = new FormData();
+      formData.append("cbz", blob, "page.cbz");
+      const result = await api.savePageCbz(currentProjectId, currentPage.id, formData);
+      setCbzStatus(`Saved as pages/${result.filename}`);
+      setCbzSavedPath(`pages/${result.filename}`);
+    } catch (err) {
+      setCbzStatus(`Failed: ${err.message}`);
+    } finally {
+      restoreImages();
+      restoreBubbles();
+      setCbzBusy(false);
+      if (hadSelection) setSelectedPanelId(hadSelection);
+    }
+  };
+
   // Same per-page capture as exportPagePdf, looped across every page into one multi-page
   // PDF instead of one file per page. html2canvas can only capture DOM that's actually on
   // screen, and only one page is ever mounted at a time (`currentPage`) — so this works by
@@ -1441,6 +1481,7 @@ export default function App() {
           onRename={renamePage}
           onAddFloatingPanel={addFloatingPanel}
           onExportPdf={exportPagePdf}
+          onExportCbz={exportPageCbz}
           onExportAllPdf={exportAllPagesPdf}
           onExportAllCbz={exportAllPagesCbz}
           onExportAllEpub={exportAllPagesEpub}
@@ -2128,6 +2169,7 @@ function PageBar({
   onRename,
   onAddFloatingPanel,
   onExportPdf,
+  onExportCbz,
   onExportAllPdf,
   onExportAllCbz,
   onExportAllEpub,
@@ -2345,6 +2387,19 @@ function PageBar({
                 }}
               >
                 {pdfBusy ? "Saving PDF…" : "Save as PDF"}
+              </button>
+            )}
+            {currentPage && (
+              <button
+                type="button"
+                className="page-menu-item"
+                disabled={pdfBusy || cbzBusy || epubBusy}
+                onClick={() => {
+                  setShowMenu(false);
+                  onExportCbz();
+                }}
+              >
+                {cbzBusy ? "Saving CBZ…" : "Save as CBZ"}
               </button>
             )}
             {pages.length > 1 && (

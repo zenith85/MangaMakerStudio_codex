@@ -763,6 +763,24 @@ app.post("/api/projects/:projectId/pdf", upload.single("pdf"), (req, res) => {
 // client-side — see exportAllPagesCbz in App.jsx), living at the project's root next to
 // the equivalent all-pages PDF. CBZ readers just expect a plain zip of page images in
 // order, nothing more, so the server's only job is to persist the already-built bytes.
+// Saves a single page as its own one-image CBZ (built client-side — see exportPageCbz in
+// App.jsx), living in pages/ alongside the equivalent single-page PDF. A one-page CBZ is
+// an unusual thing to want on its own, but this only exists for symmetry with "Save as
+// PDF" right next to it in the menu — same file, same page slug, just a .cbz extension.
+app.post("/api/projects/:projectId/pages/:pageId/cbz", upload.single("cbz"), (req, res) => {
+  const { projectId, pageId } = req.params;
+  const pages = listPages(projectId);
+  const page = pages.find((p) => p.id === pageId);
+  if (!page) return res.status(404).json({ error: "page not found" });
+  if (!req.file) return res.status(400).json({ error: "cbz is required" });
+
+  const dir = path.join(PROJECTS_DIR, projectId, "pages");
+  fs.mkdirSync(dir, { recursive: true });
+  const filename = `${slugifyTitle(page.title)}.cbz`;
+  fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+  res.json({ ok: true, filename });
+});
+
 app.post("/api/projects/:projectId/cbz", upload.single("cbz"), (req, res) => {
   const { projectId } = req.params;
   const project = getProject(projectId);
