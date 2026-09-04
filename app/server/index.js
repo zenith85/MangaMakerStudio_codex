@@ -415,6 +415,30 @@ app.get("/api/projects/:projectId/pages/:id", (req, res) => {
   res.json(withPageImages(req.params.projectId, page));
 });
 
+// Pages Manager (drag-to-reorder, insert-between): takes the full desired order of page
+// ids and rewrites the pages array to match it — simplest correct model, no separate
+// "move to index" math to get wrong. Also renumbers every page's title to its new
+// 1-based position, since the Pages Manager promises page names always reflect where a
+// page actually sits in the book — this intentionally overrides any custom title the
+// moment pages are reordered through it, same tradeoff quickAddPage's position-based
+// naming already makes on the frontend.
+app.post("/api/projects/:projectId/pages/reorder", (req, res) => {
+  const { projectId } = req.params;
+  const { pageIds } = req.body;
+  const pages = listPages(projectId);
+
+  if (!Array.isArray(pageIds) || pageIds.length !== pages.length || new Set(pageIds).size !== pageIds.length) {
+    return res.status(400).json({ error: "pageIds must include every page exactly once" });
+  }
+  const byId = new Map(pages.map((p) => [p.id, p]));
+  const reordered = pageIds.map((id) => byId.get(id));
+  if (reordered.some((p) => !p)) return res.status(400).json({ error: "unknown page id" });
+
+  reordered.forEach((p, i) => { p.title = String(i + 1); });
+  savePages(projectId, reordered);
+  res.json(reordered.map((p) => withPageImages(projectId, p)));
+});
+
 // A floating panel is a regular panel in every way that matters (scene/generate/edit,
 // bubbles, expressions, image transforms — see findPanel) except where it lives on the
 // page: not a slot in the layout grid, but its own freely dragged/resized box, in

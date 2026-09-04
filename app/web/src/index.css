@@ -1816,6 +1816,146 @@ button.primary:disabled {
   text-align: left;
 }
 
+/* ---------- Pages Manager (drag-to-reorder, insert-between) ---------- */
+
+.pages-manager-modal {
+  width: 900px;
+  max-width: 94vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.pages-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pages-manager-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.pages-manager-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: 14px;
+}
+
+.pages-manager-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 110px;
+  padding: 8px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-input);
+  cursor: grab;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.pages-manager-thumb:hover {
+  border-color: #4a5cff;
+}
+
+.pages-manager-thumb.current {
+  border-color: #4a5cff;
+  background: var(--accent-tint-bg);
+}
+
+.pages-manager-thumb.dragging {
+  opacity: 0.4;
+}
+
+/* Grid container for the non-freeform layouts (gridTemplateAreas/Columns/Rows set
+   inline per page); freeform (diagonal) layouts ignore the grid and rely on each
+   .pages-manager-thumb-panel.freeform positioning itself absolutely instead. */
+.pages-manager-thumb-image {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 5 / 7;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-canvas);
+  display: grid;
+  gap: 2px;
+}
+
+.pages-manager-thumb-panel {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-surface-alt);
+  border-radius: 1px;
+}
+
+.pages-manager-thumb-panel.freeform {
+  position: absolute;
+}
+
+.pages-manager-thumb-panel img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pages-manager-thumb-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Sits between two thumbnails — a hover-revealed "+" normally, or an enlarged drop
+   target the moment a thumbnail is picked up for dragging (isDragActive). */
+.pages-manager-gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  align-self: stretch;
+}
+
+.pages-manager-gap.drag-active {
+  width: 28px;
+}
+
+.pages-manager-gap.drag-over {
+  background: var(--accent-tint-bg);
+  border-radius: 6px;
+}
+
+.pages-manager-gap-insert {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.pages-manager-gap:hover .pages-manager-gap-insert {
+  opacity: 1;
+  border-color: #4a5cff;
+  color: #4a5cff;
+}
+
 .entity-modal-body {
   display: flex;
   align-items: flex-start;

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, Fragment } from "react";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import JSZip from "jszip";
@@ -790,6 +790,7 @@ export default function App() {
   const [pages, setPages] = useState([]);
   const [currentPage, setCurrentPage] = useState(null);
   const [selectedPanelId, setSelectedPanelId] = useState(null);
+  const [showPagesManager, setShowPagesManager] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
@@ -1088,6 +1089,10 @@ export default function App() {
     if (currentPage?.id === pageId) setCurrentPage(updated);
   };
 
+  // Deleting a page shifts every later page's position by one, so their sequence-number
+  // titles would otherwise go stale (page "4" suddenly being the 3rd page in the book) —
+  // reorderPages' renumbering (see below) is what keeps them matching reality, same as
+  // it does after an insert or a drag reorder.
   const deletePage = async (pageId) => {
     const target = pages.find((p) => p.id === pageId);
     if (!target) return;
@@ -1096,11 +1101,48 @@ export default function App() {
     if (!window.confirm(`Delete "${target.title}" and all its panels${detail}? This can't be undone.`)) return;
 
     await api.deletePage(currentProjectId, pageId);
-    setPages((prev) => prev.filter((p) => p.id !== pageId));
     if (currentPage?.id === pageId) {
       setCurrentPage(null);
       setSelectedPanelId(null);
     }
+
+    const remainingIds = pages.filter((p) => p.id !== pageId).map((p) => p.id);
+    if (remainingIds.length > 0) {
+      await reorderPages(remainingIds);
+    } else {
+      setPages([]);
+    }
+  };
+
+  // Pages Manager: reorders the whole book to `pageIds`'s order and renumbers every
+  // page's title to its new 1-based position (see the /reorder route) — used both for
+  // drag-to-reorder and, after inserting a new page below, for slotting it into place.
+  const reorderPages = async (pageIds) => {
+    const updated = await api.reorderPages(currentProjectId, pageIds);
+    setPages(updated);
+    if (currentPage) {
+      const stillCurrent = updated.find((p) => p.id === currentPage.id);
+      if (stillCurrent) setCurrentPage(stillCurrent);
+    }
+    return updated;
+  };
+
+  // Inserts a brand-new page so it lands at `index` (0-based, in book order) — creates it
+  // normally (which always appends), then reorders the whole book with it spliced into
+  // place. The reorder call is what actually assigns its sequence-number title, so
+  // whatever title we send here is only ever visible for an instant.
+  const insertPageAt = async (index) => {
+    const neighbor = pages[Math.max(0, index - 1)] || currentPage;
+    const layout = neighbor?.layout || "grid-2x2";
+    const stylePreset = neighbor?.stylePreset || "manga_bw";
+    const panelCount = LAYOUTS.find((l) => l.value === layout)?.panelCount ?? 4;
+    const created = await api.createPage(currentProjectId, { title: "New page", layout, stylePreset, panelCount });
+
+    const ids = pages.map((p) => p.id);
+    ids.splice(index, 0, created.id);
+    const updated = await reorderPages(ids);
+    const opened = updated.find((p) => p.id === created.id);
+    if (opened) setCurrentPage(opened);
   };
 
   // Renders the page canvas exactly as shown on screen (panels, images, speech bubbles)
@@ -1479,6 +1521,7 @@ export default function App() {
           onChangeLayout={changeLayout}
           onDelete={deletePage}
           onRename={renamePage}
+          onOpenPagesManager={() => setShowPagesManager(true)}
           onAddFloatingPanel={addFloatingPanel}
           onExportPdf={exportPagePdf}
           onExportCbz={exportPageCbz}
@@ -1584,6 +1627,17 @@ export default function App() {
           allPanels={allPanelsForMention}
           onClose={() => setEditingEntity(null)}
           onSaved={() => refreshEntities(currentProjectId)}
+        />
+      )}
+
+      {showPagesManager && (
+        <PagesManagerModal
+          pages={pages}
+          currentPage={currentPage}
+          onClose={() => setShowPagesManager(false)}
+          onOpenPage={openPage}
+          onInsertAt={insertPageAt}
+          onReorder={reorderPages}
         />
       )}
 
@@ -2167,6 +2221,7 @@ function PageBar({
   onChangeLayout,
   onDelete,
   onRename,
+  onOpenPagesManager,
   onAddFloatingPanel,
   onExportPdf,
   onExportCbz,
@@ -2311,6 +2366,16 @@ function PageBar({
         aria-label="Add a new page"
       >
         +
+      </button>
+
+      <button
+        type="button"
+        className="page-menu-trigger"
+        onClick={onOpenPagesManager}
+        title="Manage pages — reorder by drag, insert a page anywhere"
+        aria-label="Manage pages"
+      >
+        ▦
       </button>
 
       <div className="page-menu-wrap" ref={menuRef}>
@@ -2503,6 +2568,177 @@ function PageBar({
           <button type="submit">Create</button>
         </form>
       )}
+    </div>
+  );
+}
+
+// A single page's cover thumbnail in the Pages Manager — a small live replica of the
+// page's actual panel arrangement (same layout template lookup as LayoutPicker/
+// PageCanvas), each slot filled with that panel's own image, so you can recognize a
+// page by its actual content at a glance instead of just one frame standing in for the
+// whole thing. Ignores any hand-dragged seam sizes (page.gridColumns/gridRows) and skips
+// resize handles/selection — this is a read-only preview, not the real canvas. Draggable
+// for reordering; a plain click opens it, same as picking it from the PageBar dropdown.
+function PagesManagerThumb({ page, index, isCurrent, isDragging, onOpen, onDragStart, onDragEnd }) {
+  const template = LAYOUTS.find((l) => l.value === page.layout) || LAYOUTS.find((l) => l.value === "grid-2x2");
+  const isFreeform = !!template.panels;
+
+  return (
+    <div
+      className={`pages-manager-thumb${isCurrent ? " current" : ""}${isDragging ? " dragging" : ""}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        // Firefox requires setData for a drag to actually start.
+        e.dataTransfer.setData("text/plain", page.id);
+        onDragStart(index);
+      }}
+      onDragEnd={onDragEnd}
+      onClick={() => onOpen(page.id)}
+      title={`Open "${page.title}"`}
+    >
+      <div
+        className="pages-manager-thumb-image"
+        style={isFreeform ? undefined : { gridTemplateAreas: template.areas, gridTemplateColumns: template.columns, gridTemplateRows: template.rows }}
+      >
+        {page.panels.map((panel, i) => {
+          const slot = isFreeform ? template.panels[i] : null;
+          if (isFreeform && !slot) return null;
+          const style = isFreeform
+            ? { left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%`, clipPath: slot.clipPath }
+            : { gridArea: `p${i + 1}` };
+          return (
+            <div key={panel.id} className={`pages-manager-thumb-panel${isFreeform ? " freeform" : ""}`} style={style}>
+              {panel.imageUrl && <img src={panel.imageUrl} alt="" draggable={false} />}
+            </div>
+          );
+        })}
+        {/* Floating panels float over the whole layout, same as on the real page — see
+            PageCanvas's own floatingPanels pass, rendered after the grid/freeform panels
+            above for the same reason. */}
+        {(page.floatingPanels || []).map((panel) => (
+          <div
+            key={panel.id}
+            className="pages-manager-thumb-panel freeform"
+            style={{ left: `${panel.x}%`, top: `${panel.y}%`, width: `${panel.width}%`, height: `${panel.height}%` }}
+          >
+            {panel.imageUrl && <img src={panel.imageUrl} alt="" draggable={false} />}
+          </div>
+        ))}
+      </div>
+      <span className="pages-manager-thumb-label">{page.title}</span>
+    </div>
+  );
+}
+
+// The thin strip between two thumbnails (and before the first / after the last) — while
+// nothing is being dragged it's an "insert a page here" button; while a thumbnail is
+// mid-drag it becomes that thumbnail's drop target instead, highlighting on hover.
+// `index` is expressed in terms of the page order BEFORE any drag/insert, i.e. "this
+// many pages come before this gap" — both onInsertAt and the reorder math in
+// PagesManagerModal interpret it that way.
+function PagesManagerGap({ index, isDragActive, isOver, onDragOver, onDragLeave, onDrop, onInsertAt }) {
+  return (
+    <div
+      className={`pages-manager-gap${isDragActive ? " drag-active" : ""}${isOver ? " drag-over" : ""}`}
+      onDragOver={(e) => {
+        if (!isDragActive) return;
+        e.preventDefault();
+        onDragOver(index);
+      }}
+      onDragLeave={() => onDragLeave(index)}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(index);
+      }}
+    >
+      {!isDragActive && (
+        <button type="button" className="pages-manager-gap-insert" title="Insert a page here" onClick={() => onInsertAt(index)}>
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Full-book overview: every page as a draggable thumbnail, with an insert affordance in
+// every gap between them. Page titles are always kept in sync with position here (see
+// the /pages/reorder route) — this view is the one place titles are guaranteed to mean
+// "this is page N", unlike the free-text rename elsewhere in PageBar.
+function PagesManagerModal({ pages, currentPage, onClose, onOpenPage, onInsertAt, onReorder }) {
+  const [dragIndex, setDragIndex] = useState(null); // index into `pages` of the thumbnail being dragged
+  const [overGap, setOverGap] = useState(null);
+
+  const handleDrop = (gapIndex) => {
+    if (dragIndex == null) return;
+    const draggedId = pages[dragIndex].id;
+    // gapIndex is expressed against the PRE-drag order; removing the dragged page shifts
+    // every gap after its original spot one to the left in the post-removal array.
+    const adjusted = gapIndex > dragIndex ? gapIndex - 1 : gapIndex;
+    setDragIndex(null);
+    setOverGap(null);
+    if (adjusted === dragIndex) return; // dropped back where it started — nothing to do
+
+    const ids = pages.map((p) => p.id).filter((id) => id !== draggedId);
+    ids.splice(adjusted, 0, draggedId);
+    onReorder(ids);
+  };
+
+  const gapProps = (index) => ({
+    index,
+    isDragActive: dragIndex != null,
+    isOver: overGap === index,
+    onDragOver: setOverGap,
+    onDragLeave: (i) => setOverGap((v) => (v === i ? null : v)),
+    onDrop: handleDrop,
+    onInsertAt,
+  });
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal pages-manager-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="pages-manager-header">
+          <h2>Manage pages</h2>
+          <button type="button" className="pages-manager-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <p className="empty-hint">
+          Drag a page to reorder it, or click + between pages to insert a new one. Page names stay in sync with
+          their position in the book.
+        </p>
+
+        {pages.length === 0 ? (
+          <p className="empty-hint">No pages yet.</p>
+        ) : (
+          <div className="pages-manager-grid">
+            <PagesManagerGap {...gapProps(0)} />
+            {pages.map((page, index) => (
+              <Fragment key={page.id}>
+                <PagesManagerThumb
+                  page={page}
+                  index={index}
+                  isCurrent={page.id === currentPage?.id}
+                  isDragging={dragIndex === index}
+                  onOpen={onOpenPage}
+                  onDragStart={setDragIndex}
+                  onDragEnd={() => {
+                    setDragIndex(null);
+                    setOverGap(null);
+                  }}
+                />
+                <PagesManagerGap {...gapProps(index + 1)} />
+              </Fragment>
+            ))}
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
