@@ -42,6 +42,26 @@ import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
 import { applyImageFilter } from "./imageFilters.js";
 import { composePageThumbnail } from "./pageThumbnail.js";
 import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
+// Ibraheem HTML Studio — a fully separate feature bolted on beneath, with its own
+// storage (bookStore.js, a sibling book-projects/ tree, never Manga Studio's projects/)
+// and its own Codex text-curation call (bookCodex.js). It reuses generateImageViaCodex
+// from codex.js as-is (imported above), since illustration generation is identical
+// mechanics either way.
+import {
+  listBookProjects,
+  getBookProject,
+  createBookProject,
+  deleteBookProject,
+  getBook,
+  saveBook,
+  saveBookImage,
+  loadBookImage,
+  bookImageInfo,
+  BOOK_PROJECTS_DIR,
+} from "./bookStore.js";
+import { generateBookContentViaCodex } from "./bookCodex.js";
+import { buildBookContentPrompt, buildBookCoverImagePrompt, buildBookChapterImagePrompt } from "./bookPrompt.js";
+import { renderBookHtml } from "./bookTemplate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
@@ -113,6 +133,7 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use("/projects", express.static(PROJECTS_DIR)); // serves .../<projectId>/<kind>/<entityId>/image.png directly
+app.use("/book-projects", express.static(BOOK_PROJECTS_DIR)); // serves .../<projectId>/book-images/<imageId>.png
 
 // Lets the frontend tell whether a local agent is running on this visitor's own machine
 // at all (see the health-check in App.jsx) — distinct from any real route, so it stays
@@ -1023,6 +1044,185 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
     if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
     res.status(500).json({ error: err.message });
   }
+});
+
+// ==================== Ibraheem HTML Studio ====================
+// Entirely separate route namespace (/api/book-projects/...) and storage
+// (bookStore.js's book-projects/ tree) from everything above — no shared state with
+// Manga Studio's /api/projects routes beyond the same Express app and the same
+// generateImageViaCodex/CodexError already imported at the top of this file.
+
+app.get("/api/book-projects", (_req, res) => {
+  res.json(listBookProjects());
+});
+
+app.post("/api/book-projects", (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  res.json(createBookProject(name));
+});
+
+app.delete("/api/book-projects/:id", (req, res) => {
+  deleteBookProject(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post("/api/book-projects/:id/open-folder", (req, res) => {
+  const dir = path.resolve(path.join(BOOK_PROJECTS_DIR, req.params.id));
+  if (!dir.startsWith(path.resolve(BOOK_PROJECTS_DIR) + path.sep)) {
+    return res.status(400).json({ error: "invalid project id" });
+  }
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: "project not found" });
+
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+  execFile(opener, [dir], (err) => {
+    if (err) console.error(`open-folder: failed to launch ${opener}:`, err.message);
+  });
+  res.json({ ok: true, path: dir });
+});
+
+function withBookImages(projectId, book) {
+  const images = { cover: bookImageInfo(projectId, "cover") };
+  (book.content?.chapters || []).forEach((_, i) => {
+    images[`chapter-${i}`] = bookImageInfo(projectId, `chapter-${i}`);
+  });
+  return { ...book, images };
+}
+
+app.get("/api/book-projects/:projectId/book", (req, res) => {
+  const project = getBookProject(req.params.projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  res.json(withBookImages(req.params.projectId, getBook(req.params.projectId)));
+});
+
+app.patch("/api/book-projects/:projectId/book", (req, res) => {
+  const { projectId } = req.params;
+  const project = getBookProject(projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const book = getBook(projectId);
+  const { title, author, language, notes, content } = req.body;
+  if (title !== undefined) book.title = title;
+  if (author !== undefined) book.author = author;
+  if (language !== undefined) book.language = language;
+  if (notes !== undefined) book.notes = notes;
+  if (content !== undefined) book.content = content; // manual edits to already-generated content
+  saveBook(projectId, book);
+  res.json(withBookImages(projectId, book));
+});
+
+// Chapter count is fixed at 7 to match a genuine ~10-minute read; not exposed as a
+// setting since Codex already adapts each chapter's length to the material.
+const BOOK_CHAPTER_COUNT = 7;
+
+app.post("/api/book-projects/:projectId/book/generate-content", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = getBookProject(projectId);
+    if (!project) return res.status(404).json({ error: "project not found" });
+    const book = getBook(projectId);
+    if (!book.title?.trim()) return res.status(400).json({ error: "book title is required" });
+
+    const prompt = buildBookContentPrompt({
+      title: book.title,
+      author: book.author,
+      language: book.language || "English",
+      chapterCount: BOOK_CHAPTER_COUNT,
+      notes: book.notes,
+    });
+    const content = await generateBookContentViaCodex(projectId, prompt);
+    book.content = content;
+    saveBook(projectId, book);
+    res.json(withBookImages(projectId, book));
+  } catch (err) {
+    console.error(err);
+    if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Returns the exact prompt text that generate-content would send to Codex right now,
+// without actually calling it — lets the UI show "what will be created" before
+// committing to a (slow, one-shot) generation call.
+app.get("/api/book-projects/:projectId/book/content-prompt", (req, res) => {
+  const { projectId } = req.params;
+  const book = getBook(projectId);
+  if (!book.title?.trim()) return res.status(400).json({ error: "book title is required" });
+  const prompt = buildBookContentPrompt({
+    title: book.title,
+    author: book.author,
+    language: book.language || "English",
+    chapterCount: BOOK_CHAPTER_COUNT,
+    notes: book.notes,
+  });
+  res.json({ prompt });
+});
+
+const BOOK_ILLUSTRATION_STYLES = new Set(["bw_illustration", "color_illustration"]);
+
+app.post("/api/book-projects/:projectId/book/cover/generate", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const book = getBook(projectId);
+    if (!book.content) return res.status(400).json({ error: "generate the book's content first" });
+    const style = BOOK_ILLUSTRATION_STYLES.has(req.body?.style) ? req.body.style : "bw_illustration";
+
+    const prompt = buildBookCoverImagePrompt({ title: book.content.title, tagline: book.content.tagline, style });
+    const outputPath = path.join(BOOK_PROJECTS_DIR, projectId, "book-images", "cover.png");
+    const buffer = await generateImageViaCodex(projectId, outputPath, prompt);
+    saveBookImage(projectId, "cover", buffer);
+    res.json(withBookImages(projectId, book));
+  } catch (err) {
+    console.error(err);
+    if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/book-projects/:projectId/book/chapters/:index/generate", async (req, res) => {
+  try {
+    const { projectId, index } = req.params;
+    const book = getBook(projectId);
+    const chapter = book.content?.chapters?.[Number(index)];
+    if (!chapter) return res.status(404).json({ error: "chapter not found" });
+    const style = BOOK_ILLUSTRATION_STYLES.has(req.body?.style) ? req.body.style : "bw_illustration";
+
+    const imageId = `chapter-${index}`;
+    const prompt = buildBookChapterImagePrompt({ imagePrompt: chapter.imagePrompt, style });
+    const outputPath = path.join(BOOK_PROJECTS_DIR, projectId, "book-images", `${imageId}.png`);
+    const buffer = await generateImageViaCodex(projectId, outputPath, prompt);
+    saveBookImage(projectId, imageId, buffer);
+    res.json(withBookImages(projectId, book));
+  } catch (err) {
+    console.error(err);
+    if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/book-projects/:projectId/book/export", (req, res) => {
+  const { projectId } = req.params;
+  const project = getBookProject(projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const book = getBook(projectId);
+  if (!book.content) return res.status(400).json({ error: "generate the book's content first" });
+
+  const images = { cover: loadBookImage(projectId, "cover") };
+  book.content.chapters.forEach((_, i) => {
+    images[`chapter-${i}`] = loadBookImage(projectId, `chapter-${i}`);
+  });
+
+  const html = renderBookHtml(book.content, images, { language: book.language });
+  const safeTitle = (book.content.title || book.title || "book").replace(/[\\/:*?"<>|]+/g, "").trim() || "book";
+  const filename = `${safeTitle}_10min.html`;
+  fs.writeFileSync(path.join(BOOK_PROJECTS_DIR, projectId, filename), html);
+
+  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, "_");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+  );
+  res.send(html);
 });
 
 const PORT = process.env.PORT || 8787;

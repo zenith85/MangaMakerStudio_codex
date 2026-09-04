@@ -2,10 +2,15 @@ import { WebSocketServer } from "ws";
 import pty from "node-pty";
 import os from "node:os";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
+// Ibraheem HTML Studio's book projects live in a separate tree (see bookStore.js) —
+// checked as a fallback below so its book projects' terminal sessions cwd into their
+// own folder too, without this file needing to know anything else about that studio.
+const BOOK_PROJECTS_DIR = path.join(__dirname, "book-projects");
 
 const LOCALHOST_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
@@ -23,7 +28,13 @@ function getOrCreateSession(projectId) {
   let session = sessions.get(key);
   if (session) return session;
 
-  const cwd = key ? path.join(PROJECTS_DIR, key) : os.homedir();
+  // A manga project folder always wins when both somehow exist (extremely unlikely,
+  // since the two studios use unrelated id namespaces) — this preserves the exact
+  // previous cwd for every existing manga project, whose folder is the only one that
+  // has ever existed under either path until now.
+  const mangaDir = key ? path.join(PROJECTS_DIR, key) : null;
+  const bookDir = key ? path.join(BOOK_PROJECTS_DIR, key) : null;
+  const cwd = !key ? os.homedir() : fs.existsSync(mangaDir) ? mangaDir : fs.existsSync(bookDir) ? bookDir : mangaDir;
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "powershell.exe" : (process.env.SHELL || "/bin/bash");
   const args = isWindows ? [] : ["-l"];

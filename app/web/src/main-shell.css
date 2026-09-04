@@ -1,0 +1,22 @@
+/* Styles for the top-level studio-switcher button in main.jsx only — never touches
+   index.css (Manga Studio's stylesheet). Fixed bottom-left, opposite the terminal
+   toggle (index.css's .terminal-toggle, fixed bottom-right), so the two never overlap
+   regardless of which studio is on screen. */
+
+.studio-switcher-fab {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 40;
+  background: #2a2b33;
+  color: #e8e8ec;
+  border: 1px solid #34353f;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.studio-switcher-fab:hover {
+  border-color: #4a5cff;
+}

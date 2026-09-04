@@ -1,0 +1,294 @@
+/* Styles for BookApp.jsx / StudioPicker.jsx only — kept out of index.css (Manga
+   Studio's stylesheet) entirely. Reuses generic layout classes index.css already
+   defines (.landing, .project-grid, .project-card, .sidebar, .app-name, .back-link,
+   .empty-hint, .new-project-form, ...) since index.css loads globally; only genuinely
+   new classes are defined here. */
+
+.landing-header-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.empty-hint.error {
+  color: #ff8a8a;
+}
+
+.book-new-form {
+  flex-wrap: wrap;
+  max-width: 420px;
+}
+
+.book-new-form input,
+.book-new-form select {
+  flex: 1 1 160px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.book-new-form-notes {
+  flex: 1 1 100%;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.book-meta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.book-meta-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.book-meta-card input,
+.book-meta-card select,
+.book-meta-card textarea {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.book-export-link {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  margin-top: 4px;
+  background: #4a5cff;
+  color: white;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.book-main {
+  max-width: 900px;
+}
+
+.book-generate-prompt {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.book-generate-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.book-generate-actions button {
+  width: auto;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.book-generate-actions button.primary {
+  width: auto;
+  border: none;
+}
+
+.book-prompt-preview {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.book-prompt-preview-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.book-prompt-preview pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.book-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.book-editor-toolbar {
+  display: flex;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-canvas);
+  padding: 8px 0;
+  z-index: 1;
+}
+
+.book-editor-toolbar button {
+  width: auto;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.book-editor-toolbar button.primary {
+  width: auto;
+  border: none;
+  background: #4a5cff;
+  color: white;
+}
+
+.book-card {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.book-card h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.book-card-body {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.book-card-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.book-card-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.book-card-fields input,
+.book-card-fields textarea {
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.book-section-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.book-section-row input {
+  flex: 0 0 160px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.book-section-row textarea {
+  flex: 1;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.book-image-slot {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.book-image-slot img {
+  width: 200px;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+
+.book-image-slot-placeholder {
+  width: 200px;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+  padding: 8px;
+}
+
+.book-image-slot button {
+  width: 200px;
+  padding: 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.book-image-slot button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

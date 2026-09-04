@@ -10,6 +10,9 @@ app/web/public/downloads/
 # grows large, and isn't something we want in version control.
 app/server/projects/
 
+# Same, for Ibraheem HTML Studio's book projects (see bookStore.js).
+app/server/book-projects/
+
 # Legacy/generated panel renders (pre-dates the projects/ folder structure)
 app/server/uploads/
 
