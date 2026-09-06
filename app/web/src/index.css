@@ -367,6 +367,168 @@ textarea {
   font-size: 12px;
 }
 
+.asset-card.dragging {
+  opacity: 0.4;
+}
+
+/* ---------- Entity folders (grouping within characters/places/objects/references) ---------- */
+
+.entity-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.entity-toolbar .add-entity-button {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.add-folder-button {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.add-folder-button:hover {
+  border-color: #4a5cff;
+}
+
+.entity-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.entity-folder-card {
+  position: relative;
+  background: var(--bg-surface-alt);
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+
+.entity-folder-card.drag-over {
+  border-color: #4a5cff;
+  background: var(--accent-tint-bg);
+}
+
+.entity-folder-card-open {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 8px 6px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-family: inherit;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.entity-folder-card-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.entity-folder-card-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.entity-folder-card-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.entity-folder-card-actions {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+}
+
+.entity-folder-card:hover .entity-folder-card-actions {
+  opacity: 1;
+}
+
+.entity-folder-card-actions button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-input-hover);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.entity-folder-breadcrumb {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-surface-alt);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.entity-folder-breadcrumb:hover,
+.entity-folder-breadcrumb.drag-over {
+  border-color: #4a5cff;
+}
+
+.entity-folder-breadcrumb.drag-over {
+  background: var(--accent-tint-bg);
+}
+
+.entity-folder-breadcrumb-name {
+  color: var(--text-muted);
+}
+
+/* Asset card right-click menu (rename / move to folder / delete) — positioned at the
+   cursor via inline left/top, so fixed (not the page-menu-popover's absolute-to-trigger)
+   is what actually anchors it correctly regardless of where in the sidebar it opened. */
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.context-menu-label {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
 .page-bar {
   display: flex;
   align-items: center;

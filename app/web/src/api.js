@@ -31,6 +31,16 @@ export const api = {
     req(`/projects/${projectId}/${kind}/${id}`, { method: "DELETE" }),
   generateEntity: (projectId, kind, id) =>
     req(`/projects/${projectId}/${kind}/${id}/generate`, { method: "POST", ...json({}) }),
+  moveEntityToFolder: (projectId, kind, id, folderId) =>
+    req(`/projects/${projectId}/${kind}/${id}/folder`, { method: "PATCH", ...json({ folderId }) }),
+
+  listFolders: (projectId, kind) => req(`/projects/${projectId}/${kind}/folders`),
+  createFolder: (projectId, kind, name) =>
+    req(`/projects/${projectId}/${kind}/folders`, { method: "POST", ...json({ name }) }),
+  renameFolder: (projectId, kind, folderId, name) =>
+    req(`/projects/${projectId}/${kind}/folders/${folderId}`, { method: "PATCH", ...json({ name }) }),
+  deleteFolder: (projectId, kind, folderId) =>
+    req(`/projects/${projectId}/${kind}/folders/${folderId}`, { method: "DELETE" }),
 
   listFonts: (projectId) => req(`/projects/${projectId}/fonts`),
   createFont: (projectId, formData) => req(`/projects/${projectId}/fonts`, { method: "POST", body: formData }),

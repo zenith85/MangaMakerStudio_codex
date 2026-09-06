@@ -130,14 +130,14 @@ export function getEntity(projectId, kind, entityId) {
   return readEntity(projectId, kind, entityId);
 }
 
-export function createEntity(projectId, kind, { name, fields = {}, style = "", descriptionDoc }) {
+export function createEntity(projectId, kind, { name, fields = {}, style = "", descriptionDoc, folderId = null }) {
   const kindDir = path.join(projectDir(projectId), kind);
   fs.mkdirSync(kindDir, { recursive: true });
   const id = uniqueSlug(kindDir, name);
   const dir = path.join(kindDir, id);
   fs.mkdirSync(dir, { recursive: true });
 
-  const meta = { name: name.trim(), fields, style, descriptionDoc, createdAt: Date.now() };
+  const meta = { name: name.trim(), fields, style, descriptionDoc, folderId, createdAt: Date.now() };
   writeJSON(path.join(dir, "meta.json"), meta);
   writeInformationTxt(dir, meta);
   return { ...meta, id, hasImage: false };
@@ -152,6 +152,9 @@ export function updateEntity(projectId, kind, entityId, updates) {
   if (updates.fields) meta.fields = { ...meta.fields, ...updates.fields };
   if (updates.style !== undefined) meta.style = updates.style;
   if (updates.descriptionDoc !== undefined) meta.descriptionDoc = updates.descriptionDoc;
+  // null (not just a real id) is a valid value here — it's how an entity gets moved back
+  // to "unfiled", so this has to allow null through rather than treating it as absent.
+  if (updates.folderId !== undefined) meta.folderId = updates.folderId;
 
   writeJSON(path.join(dir, "meta.json"), meta);
   writeInformationTxt(dir, meta);
@@ -160,6 +163,29 @@ export function updateEntity(projectId, kind, entityId, updates) {
 
 export function deleteEntity(projectId, kind, entityId) {
   fs.rmSync(entityDir(projectId, kind, entityId), { recursive: true, force: true });
+}
+
+// ---------- Folders (grouping within a kind): ProjectName/<kind>/folders.json ----------
+// Folders are pure metadata — a flat {id, name, createdAt} list living alongside the
+// kind's entity subdirectories. An entity opts into one via its own meta.json's
+// `folderId` field (null = unfiled); deleting a folder un-files its entities rather than
+// deleting them (see the /folders DELETE route in index.js) — grouping is just a label,
+// losing the label shouldn't lose the picture. listEntities's directory-only filter
+// already skips this file, so it can sit right next to the entity folders with no
+// special-casing needed there.
+
+function foldersPath(projectId, kind) {
+  return path.join(projectDir(projectId), kind, "folders.json");
+}
+
+export function listFolders(projectId, kind) {
+  return readJSON(foldersPath(projectId, kind)) || [];
+}
+
+export function saveFolders(projectId, kind, folders) {
+  const kindDir = path.join(projectDir(projectId), kind);
+  fs.mkdirSync(kindDir, { recursive: true });
+  writeJSON(foldersPath(projectId, kind), folders);
 }
 
 export function saveEntityImage(projectId, kind, entityId, buffer) {

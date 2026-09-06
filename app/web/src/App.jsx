@@ -785,6 +785,13 @@ export default function App() {
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [kind, setKind] = useState("characters");
   const [entities, setEntities] = useState({ characters: [], places: [], objects: [], references: [] });
+  const [folders, setFolders] = useState({ characters: [], places: [], objects: [], references: [] });
+  // Which folder (of the current `kind`) is currently open, filtering the asset grid down
+  // to just its contents — null means the root view (folders + unfiled entities).
+  // Per-kind rather than a single flat value would let switching tabs "remember" an open
+  // folder, but that's more surprising than useful here, so switching kind always resets
+  // this back to root (see the kind-tab onClick below).
+  const [openFolderId, setOpenFolderId] = useState(null);
   const [customFonts, setCustomFonts] = useState([]); // project-scoped — uploaded once, usable by every bubble in it
   const [editingEntity, setEditingEntity] = useState(null); // { kind, entity } | { kind, entity: null } for "new"
   const [pages, setPages] = useState([]);
@@ -885,6 +892,12 @@ export default function App() {
     }
   }, []);
 
+  const refreshFolders = useCallback((projectId) => {
+    for (const k of ["characters", "places", "objects", "references"]) {
+      api.listFolders(projectId, k).then((list) => setFolders((prev) => ({ ...prev, [k]: list })));
+    }
+  }, []);
+
   const refreshPages = useCallback((projectId) => api.listPages(projectId).then(setPages), []);
 
   const refreshCustomFonts = useCallback((projectId) => api.listFonts(projectId).then(setCustomFonts), []);
@@ -910,10 +923,63 @@ export default function App() {
     setCurrentProjectId(id);
     setCurrentPage(null);
     setSelectedPanelId(null);
+    setOpenFolderId(null);
     setShowTerminal(true); // auto-open, cwd'd into this project's folder
     refreshEntities(id);
+    refreshFolders(id);
     refreshPages(id);
     refreshCustomFonts(id);
+  };
+
+  // Groups pictures within one entity kind — a folder is pure metadata (see store.js),
+  // so creating/renaming/deleting one never touches the entities inside it except to
+  // clear their folderId back to unfiled when the folder itself goes away.
+  const createFolder = async (name) => {
+    const folder = await api.createFolder(currentProjectId, kind, name);
+    setFolders((prev) => ({ ...prev, [kind]: [...prev[kind], folder] }));
+  };
+
+  const renameFolder = async (folderId, name) => {
+    const updated = await api.renameFolder(currentProjectId, kind, folderId, name);
+    setFolders((prev) => ({ ...prev, [kind]: prev[kind].map((f) => (f.id === folderId ? updated : f)) }));
+  };
+
+  const deleteFolder = async (folderId) => {
+    const target = folders[kind].find((f) => f.id === folderId);
+    if (!target) return;
+    const count = entities[kind].filter((e) => e.folderId === folderId).length;
+    const detail = count > 0 ? ` — ${count} item(s) inside will become unfiled, not deleted` : "";
+    if (!window.confirm(`Delete folder "${target.name}"?${detail}`)) return;
+
+    await api.deleteFolder(currentProjectId, kind, folderId);
+    setFolders((prev) => ({ ...prev, [kind]: prev[kind].filter((f) => f.id !== folderId) }));
+    setEntities((prev) => ({
+      ...prev,
+      [kind]: prev[kind].map((e) => (e.folderId === folderId ? { ...e, folderId: null } : e)),
+    }));
+    if (openFolderId === folderId) setOpenFolderId(null);
+  };
+
+  const moveEntityToFolder = async (entityKind, entityId, folderId) => {
+    const updated = await api.moveEntityToFolder(currentProjectId, entityKind, entityId, folderId);
+    setEntities((prev) => ({ ...prev, [entityKind]: prev[entityKind].map((e) => (e.id === entityId ? updated : e)) }));
+  };
+
+  // A quick rename from the asset card's right-click menu — same PATCH the full editor's
+  // name field uses, just without opening it first.
+  const renameEntity = async (entityKind, entityId, name) => {
+    const formData = new FormData();
+    formData.append("name", name);
+    const updated = await api.updateEntity(currentProjectId, entityKind, entityId, formData);
+    setEntities((prev) => ({ ...prev, [entityKind]: prev[entityKind].map((e) => (e.id === entityId ? updated : e)) }));
+  };
+
+  const deleteEntityById = async (entityKind, entityId) => {
+    const target = entities[entityKind].find((e) => e.id === entityId);
+    if (!target) return;
+    if (!window.confirm(`Delete "${target.name}"? This can't be undone.`)) return;
+    await api.deleteEntity(currentProjectId, entityKind, entityId);
+    setEntities((prev) => ({ ...prev, [entityKind]: prev[entityKind].filter((e) => e.id !== entityId) }));
   };
 
   // Uploads a font file from the user's computer, makes it available project-wide (not
@@ -1480,36 +1546,34 @@ export default function App() {
 
         <div className="tabs">
           {ENTITY_KINDS.map((k) => (
-            <button key={k.value} className={k.value === kind ? "active" : ""} onClick={() => setKind(k.value)}>
+            <button
+              key={k.value}
+              className={k.value === kind ? "active" : ""}
+              onClick={() => {
+                setKind(k.value);
+                setOpenFolderId(null);
+              }}
+            >
               {k.label}
             </button>
           ))}
         </div>
 
-        <button
-          className="primary add-entity-button"
-          onClick={() => setEditingEntity({ kind, entity: null })}
-        >
-          + Add new {ENTITY_KINDS.find((k) => k.value === kind).singular}
-        </button>
-
-        <div className="asset-grid">
-          {entities[kind].map((entity) => (
-            <button
-              className="asset-card"
-              key={entity.id}
-              onClick={() => setEditingEntity({ kind, entity })}
-            >
-              {entity.imageUrl ? (
-                <img src={entity.imageUrl} alt={entity.name} />
-              ) : (
-                <div className="asset-card-placeholder">No image</div>
-              )}
-              <span>{entity.name}</span>
-            </button>
-          ))}
-          {entities[kind].length === 0 && <p className="empty-hint">No {kind} yet.</p>}
-        </div>
+        <EntityAssetSection
+          kind={kind}
+          entities={entities[kind]}
+          folders={folders[kind]}
+          openFolderId={openFolderId}
+          onOpenFolder={setOpenFolderId}
+          onCreateFolder={createFolder}
+          onRenameFolder={renameFolder}
+          onDeleteFolder={deleteFolder}
+          onMoveToFolder={(entityId, folderId) => moveEntityToFolder(kind, entityId, folderId)}
+          onAddNew={() => setEditingEntity({ kind, entity: null })}
+          onEditEntity={(entity) => setEditingEntity({ kind, entity })}
+          onRenameEntity={(entityId, name) => renameEntity(kind, entityId, name)}
+          onDeleteEntity={(entityId) => deleteEntityById(kind, entityId)}
+        />
       </aside>
 
       <main className="main">
@@ -1625,6 +1689,7 @@ export default function App() {
           objects={entities.objects}
           references={entities.references}
           allPanels={allPanelsForMention}
+          folderId={openFolderId}
           onClose={() => setEditingEntity(null)}
           onSaved={() => refreshEntities(currentProjectId)}
         />
@@ -1896,11 +1961,266 @@ function FieldsEditor({ fields, onChange }) {
   );
 }
 
+// The sidebar's "+ Add new"/folders/asset-grid block for one entity kind — root view
+// shows every folder plus whatever isn't filed into one; opening a folder narrows the
+// grid down to just its contents (single level, no nesting). An asset card is always
+// draggable; where it can be DROPPED depends on which view is showing (folder cards at
+// root, the "back" breadcrumb inside a folder) — see EntityFolderCard/onDrop below.
+function EntityAssetSection({
+  kind,
+  entities,
+  folders,
+  openFolderId,
+  onOpenFolder,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onMoveToFolder,
+  onAddNew,
+  onEditEntity,
+  onRenameEntity,
+  onDeleteEntity,
+}) {
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverTarget, setDragOverTarget] = useState(null); // a folder id, or "unfiled" for the breadcrumb
+  const [contextMenu, setContextMenu] = useState(null); // { entity, x, y } | null
+  const contextMenuRef = useRef(null);
+  // The menu's actual on-screen box, clamped to fit the viewport — its height depends on
+  // how many folders exist, so a fixed offset can't account for it; this measures the
+  // real rendered size instead. Recomputed (via useLayoutEffect, before the browser
+  // paints) every time contextMenu changes, so a fresh right-click always starts from the
+  // raw cursor position rather than compounding a previous clamp.
+  const [menuPos, setMenuPos] = useState(null);
+
+  const openFolder = openFolderId ? folders.find((f) => f.id === openFolderId) : null;
+  const visibleEntities = openFolder
+    ? entities.filter((e) => e.folderId === openFolderId)
+    : entities.filter((e) => !e.folderId);
+
+  const promptNewFolder = () => {
+    const name = window.prompt("New folder name");
+    if (name?.trim()) onCreateFolder(name.trim());
+  };
+
+  // Closes on any click outside the menu itself — a click ON one of its own buttons
+  // fires this too (pointerdown precedes click), but since the target is inside
+  // contextMenuRef it's left alone here and the button's own onClick (which closes the
+  // menu itself, after acting) runs normally right after.
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onDocPointerDown = (e) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) setContextMenu(null);
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [contextMenu]);
+
+  // Renders (invisibly, via menuPos starting null below) at the raw cursor position first
+  // so there's something to measure, then immediately corrects it here — useLayoutEffect
+  // runs before the browser paints, so the user only ever sees the clamped position, not
+  // a flash of the overflowing one.
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setMenuPos(null);
+      return;
+    }
+    const el = contextMenuRef.current;
+    const margin = 8;
+    const width = el?.offsetWidth ?? 200;
+    const height = el?.offsetHeight ?? 0;
+    setMenuPos({
+      left: Math.max(margin, Math.min(contextMenu.x, window.innerWidth - width - margin)),
+      top: Math.max(margin, Math.min(contextMenu.y, window.innerHeight - height - margin)),
+    });
+  }, [contextMenu]);
+
+  const dragProps = (entity) => ({
+    draggable: true,
+    onDragStart: (e) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", entity.id);
+      setDraggingId(entity.id);
+    },
+    onDragEnd: () => {
+      setDraggingId(null);
+      setDragOverTarget(null);
+    },
+  });
+
+  const dropProps = (target) => ({
+    onDragOver: (e) => {
+      if (draggingId == null) return;
+      e.preventDefault();
+      setDragOverTarget(target);
+    },
+    onDragLeave: () => setDragOverTarget((v) => (v === target ? null : v)),
+    onDrop: (e) => {
+      e.preventDefault();
+      const entityId = e.dataTransfer.getData("text/plain");
+      setDragOverTarget(null);
+      if (entityId) onMoveToFolder(entityId, target === "unfiled" ? null : target);
+    },
+  });
+
+  return (
+    <>
+      <div className="entity-toolbar">
+        <button className="primary add-entity-button" onClick={onAddNew}>
+          + Add new {ENTITY_KINDS.find((k) => k.value === kind).singular}
+        </button>
+        <button type="button" className="add-folder-button" onClick={promptNewFolder} title="Group pictures into a folder">
+          + Folder
+        </button>
+      </div>
+
+      {openFolder ? (
+        <button
+          type="button"
+          className={`entity-folder-breadcrumb${dragOverTarget === "unfiled" ? " drag-over" : ""}`}
+          onClick={() => onOpenFolder(null)}
+          {...dropProps("unfiled")}
+        >
+          ← All {kind} <span className="entity-folder-breadcrumb-name">/ {openFolder.name}</span>
+        </button>
+      ) : (
+        folders.length > 0 && (
+          <div className="entity-folder-grid">
+            {folders.map((folder) => (
+              <EntityFolderCard
+                key={folder.id}
+                folder={folder}
+                count={entities.filter((e) => e.folderId === folder.id).length}
+                isDragOver={dragOverTarget === folder.id}
+                onOpen={() => onOpenFolder(folder.id)}
+                onRename={() => {
+                  const name = window.prompt("Rename folder", folder.name);
+                  if (name?.trim() && name.trim() !== folder.name) onRenameFolder(folder.id, name.trim());
+                }}
+                onDelete={() => onDeleteFolder(folder.id)}
+                {...dropProps(folder.id)}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      <div className="asset-grid">
+        {visibleEntities.map((entity) => (
+          <button
+            className={`asset-card${draggingId === entity.id ? " dragging" : ""}`}
+            key={entity.id}
+            onClick={() => onEditEntity(entity)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({ entity, x: e.clientX, y: e.clientY });
+            }}
+            {...dragProps(entity)}
+          >
+            {entity.imageUrl ? (
+              <img src={entity.imageUrl} alt={entity.name} draggable={false} />
+            ) : (
+              <div className="asset-card-placeholder">No image</div>
+            )}
+            <span>{entity.name}</span>
+          </button>
+        ))}
+        {visibleEntities.length === 0 && (
+          <p className="empty-hint">{openFolder ? "No pictures in this folder yet." : `No ${kind} yet.`}</p>
+        )}
+      </div>
+
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="context-menu"
+          style={{
+            left: menuPos?.left ?? contextMenu.x,
+            top: menuPos?.top ?? contextMenu.y,
+            visibility: menuPos ? "visible" : "hidden",
+          }}
+        >
+          <button
+            type="button"
+            className="page-menu-item"
+            onClick={() => {
+              const name = window.prompt("Rename", contextMenu.entity.name);
+              setContextMenu(null);
+              if (name?.trim() && name.trim() !== contextMenu.entity.name) onRenameEntity(contextMenu.entity.id, name.trim());
+            }}
+          >
+            Rename
+          </button>
+
+          <div className="context-menu-label">Move to folder</div>
+          <button
+            type="button"
+            className="page-menu-item"
+            onClick={() => {
+              onMoveToFolder(contextMenu.entity.id, null);
+              setContextMenu(null);
+            }}
+          >
+            {contextMenu.entity.folderId == null ? "✓ " : ""}Unfiled
+          </button>
+          {folders.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              className="page-menu-item"
+              onClick={() => {
+                onMoveToFolder(contextMenu.entity.id, folder.id);
+                setContextMenu(null);
+              }}
+            >
+              {contextMenu.entity.folderId === folder.id ? "✓ " : ""}
+              {folder.name}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            className="page-menu-item page-menu-item-danger"
+            onClick={() => {
+              onDeleteEntity(contextMenu.entity.id);
+              setContextMenu(null);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// One folder tile in the root view — click opens it, the small ✎/× controls rename or
+// delete it, and it doubles as a drop target while another card is being dragged (see
+// EntityAssetSection's dropProps).
+function EntityFolderCard({ folder, count, isDragOver, onOpen, onRename, onDelete, ...dropProps }) {
+  return (
+    <div className={`entity-folder-card${isDragOver ? " drag-over" : ""}`} {...dropProps}>
+      <button type="button" className="entity-folder-card-open" onClick={onOpen} title={`Open "${folder.name}"`}>
+        <span className="entity-folder-card-icon">📁</span>
+        <span className="entity-folder-card-name">{folder.name}</span>
+        <span className="entity-folder-card-count">{count}</span>
+      </button>
+      <div className="entity-folder-card-actions">
+        <button type="button" onClick={onRename} title="Rename folder" aria-label="Rename folder">
+          ✎
+        </button>
+        <button type="button" onClick={onDelete} title="Delete folder" aria-label="Delete folder">
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // The character/place/object creator: fill in info, pick a style, then either upload a
 // picture or click Generate to bridge everything to Codex. Redraw just re-runs
 // generate against the same entity, replacing its image.
 function EntityCreatorModal({
-  projectId, kind, entity: initialEntity, characters, places, objects, references, allPanels,
+  projectId, kind, entity: initialEntity, characters, places, objects, references, allPanels, folderId,
   onClose, onSaved,
 }) {
   const singular = ENTITY_KINDS.find((k) => k.value === kind).singular;
@@ -1951,6 +2271,11 @@ function EntityCreatorModal({
         setEntity(updated);
       } else {
         if (pendingFile) formData.append("image", pendingFile);
+        // Lands the new entity straight into whichever folder is currently open, instead
+        // of always unfiled and needing a second drag to group it — only matters for the
+        // create path, since moving an already-saved entity between folders goes through
+        // the dedicated drag/drop action instead, not this form.
+        if (folderId) formData.append("folderId", folderId);
         const created = await api.createEntity(projectId, kind, formData);
         setEntity(created);
         if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);

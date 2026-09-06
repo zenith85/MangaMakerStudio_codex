@@ -36,6 +36,8 @@ import {
   listFonts,
   createFont,
   deleteFont,
+  listFolders,
+  saveFolders,
 } from "./store.js";
 import { generateImageViaCodex, translateTextsViaCodex, CodexError } from "./codex.js";
 import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
@@ -243,7 +245,10 @@ for (const kind of ENTITY_KINDS) {
         return res.status(400).json({ error: err.message });
       }
     }
-    const entity = createEntity(req.params.projectId, kind, { name, fields, style, descriptionDoc });
+    // Lets "+ Add new" from inside an open folder drop the new entity straight into it,
+    // instead of always landing unfiled and needing a second move.
+    const folderId = req.body.folderId || null;
+    const entity = createEntity(req.params.projectId, kind, { name, fields, style, descriptionDoc, folderId });
     if (req.file) saveEntityImage(req.params.projectId, kind, entity.id, req.file.buffer);
     res.json(withEntityUrl(req.params.projectId, kind, getEntity(req.params.projectId, kind, entity.id)));
   });
@@ -281,6 +286,51 @@ for (const kind of ENTITY_KINDS) {
 
   app.delete(`/api/projects/:projectId/${kind}/:id`, (req, res) => {
     deleteEntity(req.params.projectId, kind, req.params.id);
+    res.json({ ok: true });
+  });
+
+  // A dedicated JSON route (not the multipart update above) for moving an entity into or
+  // out of a folder — drag-and-drop and a plain "move to folder" picker both only ever
+  // need to send this one field, not a full FormData resend of everything else.
+  app.patch(`/api/projects/:projectId/${kind}/:id/folder`, (req, res) => {
+    const { projectId, id } = req.params;
+    const entity = updateEntity(projectId, kind, id, { folderId: req.body.folderId || null });
+    if (!entity) return res.status(404).json({ error: `${kind} not found` });
+    res.json(withEntityUrl(projectId, kind, entity));
+  });
+
+  app.get(`/api/projects/:projectId/${kind}/folders`, (req, res) => {
+    res.json(listFolders(req.params.projectId, kind));
+  });
+
+  app.post(`/api/projects/:projectId/${kind}/folders`, (req, res) => {
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+    const folders = listFolders(req.params.projectId, kind);
+    const folder = { id: nanoid(10), name: name.trim(), createdAt: Date.now() };
+    folders.push(folder);
+    saveFolders(req.params.projectId, kind, folders);
+    res.json(folder);
+  });
+
+  app.patch(`/api/projects/:projectId/${kind}/folders/:folderId`, (req, res) => {
+    const { projectId, folderId } = req.params;
+    const folders = listFolders(projectId, kind);
+    const folder = folders.find((f) => f.id === folderId);
+    if (!folder) return res.status(404).json({ error: "folder not found" });
+    if (req.body.name?.trim()) folder.name = req.body.name.trim();
+    saveFolders(projectId, kind, folders);
+    res.json(folder);
+  });
+
+  // Un-files every entity in the folder (rather than deleting them) before dropping the
+  // folder itself — grouping is just a label, losing the label shouldn't lose the picture.
+  app.delete(`/api/projects/:projectId/${kind}/folders/:folderId`, (req, res) => {
+    const { projectId, folderId } = req.params;
+    for (const entity of listEntities(projectId, kind)) {
+      if (entity.folderId === folderId) updateEntity(projectId, kind, entity.id, { folderId: null });
+    }
+    saveFolders(projectId, kind, listFolders(projectId, kind).filter((f) => f.id !== folderId));
     res.json({ ok: true });
   });
 }
