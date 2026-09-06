@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
-import { runInProjectTerminal } from "./terminal.js";
+import { runInProjectTerminal, interruptProjectTerminal } from "./terminal.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
@@ -48,6 +48,25 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// generateImageViaCodex's fallback (below) picks "the newest file under Codex's own
+// ~/.codex/generated_images" when Codex's copy-to-our-requested-path drops — but that
+// folder is shared machine-wide across every project and every call. If two calls were
+// ever in flight at once, each one's fallback could just as easily grab the OTHER
+// call's output instead of its own. Serializing every codex exec (image generation and
+// translation both, since they share this same terminal-and-poll-for-a-file mechanism)
+// through one queue means at most one is ever running, so "the newest file since I
+// started" is unambiguous. fn only starts once every previously queued call has
+// settled (success or failure); its own outcome is returned to its caller untouched.
+let codexQueue = Promise.resolve();
+function withCodexLock(fn) {
+  const result = codexQueue.then(fn, fn);
+  codexQueue = result.then(
+    () => {},
+    () => {}
+  );
+  return result;
+}
+
 // Generate an image by running Codex CLI's built-in image_gen tool — via the same
 // shared terminal session the browser's embedded terminal shows for this project
 // (see terminal.js), so generation is visible instead of an invisible background call.
@@ -63,6 +82,10 @@ function sleep(ms) {
 // the reference input images Codex reads from (and, when outputPath is null, the
 // generated output itself) — it's deleted after every call either way.
 export async function generateImageViaCodex(projectId, outputPath, prompt, referenceImages = []) {
+  return withCodexLock(() => generateImageViaCodexLocked(projectId, outputPath, prompt, referenceImages));
+}
+
+async function generateImageViaCodexLocked(projectId, outputPath, prompt, referenceImages = []) {
   const projectDir = path.join(PROJECTS_DIR, projectId);
   const scratchDir = path.join(projectDir, ".tmp", nanoid(8));
   fs.mkdirSync(scratchDir, { recursive: true });
@@ -129,6 +152,12 @@ export async function generateImageViaCodex(projectId, outputPath, prompt, refer
     }
 
     if (!readPath) {
+      // Stop the hung codex process rather than abandoning it — left running, it could
+      // still finish minutes later and drop its output into the shared
+      // ~/.codex/generated_images folder, right where the NEXT call's own fallback
+      // above looks (see withCodexLock's comment for why that folder is unsafe to
+      // share between overlapping calls in the first place).
+      interruptProjectTerminal(projectId);
       throw new CodexError("codex exec did not produce an image file in time");
     }
     return fs.readFileSync(readPath);
@@ -144,6 +173,10 @@ export async function generateImageViaCodex(projectId, outputPath, prompt, refer
 // the terminal, since nothing here parses the terminal's own output stream.
 export async function translateTextsViaCodex(projectId, texts, targetLanguageName) {
   if (texts.length === 0) return [];
+  return withCodexLock(() => translateTextsViaCodexLocked(projectId, texts, targetLanguageName));
+}
+
+async function translateTextsViaCodexLocked(projectId, texts, targetLanguageName) {
   const projectDir = path.join(PROJECTS_DIR, projectId);
   const scratchDir = path.join(projectDir, ".tmp", nanoid(8));
   fs.mkdirSync(scratchDir, { recursive: true });
@@ -181,6 +214,7 @@ export async function translateTextsViaCodex(projectId, texts, targetLanguageNam
       await sleep(POLL_INTERVAL_MS);
     }
     if (!fs.existsSync(outputPath) || fs.statSync(outputPath).mtimeMs < startedAtMs) {
+      interruptProjectTerminal(projectId);
       throw new CodexError("codex exec did not produce a translation file in time");
     }
 

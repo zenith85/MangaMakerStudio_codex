@@ -79,6 +79,17 @@ export function runInProjectTerminal(projectId, command) {
   setTimeout(() => session.term.write("\r"), 50);
 }
 
+// Sends Ctrl+C into the given project's terminal session, to stop a `codex exec` that
+// generateImageViaCodex/translateTextsViaCodex (see codex.js) has given up waiting on —
+// otherwise it keeps running unattended in this same shared session and can, much
+// later, still write its output where a completely unrelated future call's fallback
+// file search (see codex.js's newestFileUnder) might pick it up as if it were that
+// later call's own result. A no-op if the session doesn't exist (nothing to interrupt).
+export function interruptProjectTerminal(projectId) {
+  const session = sessions.get(projectId || "");
+  if (session) session.term.write("\x03");
+}
+
 // Attaches a WebSocket-based terminal bridge to an existing HTTP server. Connecting
 // with ?projectId=<id> attaches to (or creates) that project's shared session, cwd'd
 // to that project's folder — so interactive programs (including `codex`) work exactly
