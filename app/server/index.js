@@ -560,12 +560,17 @@ app.delete("/api/projects/:projectId/pages/:pageId/panels/:panelId", (req, res) 
   if (!panel) return res.status(404).json({ error: "panel not found" });
 
   deletePanelImage(projectId, pageId, panel.id);
-  // Grid panels reindex order (their position in the array is what drives grid
-  // placement, see reindexPanelOrder); floating panels have no such notion — dropping
-  // one from its own array is the whole operation.
-  if (page.panels.some((p) => p.id === panelId)) {
-    page.panels = page.panels.filter((p) => p.id !== panelId);
-    reindexPanelOrder(page.panels);
+  deleteFilterImage(projectId, pageId, panel.id);
+  // A grid panel is a fixed slot the page's layout template expects exactly one of
+  // (PageCanvas indexes page.panels by the template's own p1/p2/... labels, not by
+  // however many panels currently exist) — actually removing it from the array leaves
+  // that slot with nothing to render there and crashes the whole page. So "delete" on a
+  // grid panel means "clear it back to blank" (same shape as a freshly-added panel),
+  // keeping its id/order and the array length untouched; only a floating panel — no
+  // fixed slot to preserve — actually gets removed from its array.
+  const gridIndex = page.panels.findIndex((p) => p.id === panelId);
+  if (gridIndex !== -1) {
+    page.panels[gridIndex] = { id: panel.id, order: panel.order, sceneDoc: EMPTY_SCENE_DOC };
   } else {
     page.floatingPanels = (page.floatingPanels || []).filter((p) => p.id !== panelId);
   }

@@ -3216,7 +3216,11 @@ function PageCanvas({
     >
       {isFreeform &&
         page.panels.map((panel, i) => {
+          // Guards a page saved under a layout that no longer matches its actual panel
+          // count (shouldn't happen going forward, but an already-broken page from
+          // before this was fixed should still open instead of crashing the whole app).
           const slot = template.panels[i];
+          if (!slot) return null;
           const slotStyle = { position: "absolute", left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.width}%`, height: `${slot.height}%` };
           return renderPanel(panel, slotStyle, slot.clipPath);
         })}
@@ -3224,7 +3228,13 @@ function PageCanvas({
       {regular &&
         grid.map((rowLabels, r) => (
           <div key={r} className="page-canvas-row" style={{ gridTemplateColumns: regularColumns[r] }}>
-            {rowLabels.map((label) => renderPanel(page.panels[parseInt(label.slice(1), 10) - 1], undefined, undefined))}
+            {rowLabels.map((label) => {
+              // Same guard as the freeform branch above, for the same reason — a slot
+              // the template declares (p1/p2/...) but page.panels no longer has an entry
+              // for renders as an empty gap instead of crashing.
+              const p = page.panels[parseInt(label.slice(1), 10) - 1];
+              return p ? renderPanel(p, undefined, undefined) : null;
+            })}
           </div>
         ))}
 
