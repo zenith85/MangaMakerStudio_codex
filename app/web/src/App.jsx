@@ -1066,6 +1066,21 @@ export default function App() {
     await refreshCurrentPage();
   };
 
+  // Same drop target, but for a character/place/object/reference card dragged in from
+  // the sidebar (see EntityAssetSection's dragProps) instead of a file from the OS —
+  // re-fetches that entity's own already-uploaded picture and uploads it as this panel's
+  // image through the exact same route as every other panel-image source, so there's
+  // nothing panel-specific to duplicate here (filters, PDF/CBZ export, etc. all just work).
+  const dropEntityImageOnPanel = async (panelId, entity) => {
+    if (!entity?.imageUrl) return;
+    const res = await fetch(entity.imageUrl);
+    const blob = await res.blob();
+    const formData = new FormData();
+    formData.append("image", blob, `${entity.name || "entity"}.png`);
+    await api.uploadPanelImage(currentProjectId, currentPage.id, panelId, formData);
+    await refreshCurrentPage();
+  };
+
   // Generic live-preview patch (no network call) — used by the panel editor sidebar's
   // zoom slider so the canvas visibly updates while dragging, not just once it's
   // released. Mirrors dragPanelImage above; that one's offset-specific, this one isn't
@@ -1627,6 +1642,7 @@ export default function App() {
               onDragImage={dragPanelImage}
               onDragImageEnd={commitPanelImage}
               onDropImage={uploadPanelImageDropped}
+              onDropEntityImage={dropEntityImageOnPanel}
               customFonts={customFonts}
               lang={currentPage.language || "en"}
               onBubblesLive={updateBubblesLive}
@@ -2039,6 +2055,14 @@ function EntityAssetSection({
     onDragStart: (e) => {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", entity.id);
+      // A second, distinct payload alongside the plain id above — this is what lets a
+      // panel on the page canvas (a completely different drop target, see PanelThumb's
+      // onFileDrop) recognize "an entity picture was dropped on me" instead of just a
+      // page-relative move within this sidebar, and know which picture to fetch.
+      e.dataTransfer.setData(
+        "application/x-manga-entity",
+        JSON.stringify({ kind, id: entity.id, name: entity.name, imageUrl: entity.imageUrl })
+      );
       setDraggingId(entity.id);
     },
     onDragEnd: () => {
@@ -3120,6 +3144,7 @@ function PageCanvas({
   onDragImage,
   onDragImageEnd,
   onDropImage,
+  onDropEntityImage,
   customFonts,
   lang,
   onBubblesLive,
@@ -3167,6 +3192,7 @@ function PageCanvas({
       onDragImage={onDragImage}
       onDragImageEnd={onDragImageEnd}
       onDropImage={onDropImage}
+      onDropEntityImage={onDropEntityImage}
       customFonts={customFonts}
       lang={lang}
       onBubblesLive={onBubblesLive}
@@ -3243,6 +3269,7 @@ function PageCanvas({
           onDragImage={onDragImage}
           onDragImageEnd={onDragImageEnd}
           onDropImage={onDropImage}
+          onDropEntityImage={onDropEntityImage}
           customFonts={customFonts}
           lang={lang}
           onBubblesLive={onBubblesLive}
@@ -3305,6 +3332,7 @@ function PanelThumb({
   onDragImage,
   onDragImageEnd,
   onDropImage,
+  onDropEntityImage,
   onBubblesLive,
   onBubblesCommit,
   onExpressionsLive,
@@ -3579,6 +3607,22 @@ function PanelThumb({
     e.preventDefault();
     dragCounter.current = 0;
     setDragOver(false);
+
+    // A character/place/object/reference card dragged in from the sidebar (see
+    // EntityAssetSection's dragProps) carries this instead of real OS files — check it
+    // first, since such a drag still fires this same onDrop but e.dataTransfer.files is
+    // empty for it (there's no actual file involved, just a DOM element being dragged).
+    const entityPayload = e.dataTransfer.getData("application/x-manga-entity");
+    if (entityPayload) {
+      try {
+        onDropEntityImage(panel.id, JSON.parse(entityPayload));
+      } catch {
+        // Malformed payload (shouldn't happen — we control both ends) — ignore rather
+        // than crash the drop handler.
+      }
+      return;
+    }
+
     const file = e.dataTransfer.files?.[0];
     if (file) onDropImage(panel.id, file);
   };
