@@ -258,11 +258,18 @@ export default function BookApp({ onBackToStudios }) {
     }
   };
 
+  // "Save changes" is the one button labeled for saving, so it has to cover BOTH
+  // sources of unsaved change — the left form's `draft` state AND any in-place edits
+  // sitting in the right preview pane (see BookPreviewPane) — not just the left one.
+  // Previously only Export applied preview edits, as a side effect of downloading a
+  // file, which meant "Unsaved edits here" had no way to actually get saved without
+  // also triggering a download every time.
   const saveContent = async () => {
     setSaveBusy(true);
     setError("");
     try {
-      const content = draftToContent(draft, book.content);
+      let content = draftToContent(draft, book.content);
+      content = previewRef.current?.applyEdits(content) || content;
       setBook(await bookApi.updateBook(currentProjectId, { content }));
       setPreviewVersion((v) => v + 1);
     } catch (err) {
@@ -768,6 +775,13 @@ function BookEditor({
 // or the Refresh button) discards whatever hasn't been applied yet.
 const BookPreviewPane = forwardRef(function BookPreviewPane({ projectId, reloadKey }, ref) {
   const [html, setHtml] = useState(null);
+  // Forces the <iframe> below to remount (see its key prop) on every load() — just
+  // setting a new srcDoc value on the SAME iframe element updates the attribute but
+  // doesn't reliably make the browser actually re-navigate it (a known gotcha: the old
+  // document/window just keeps sitting there), so "Refresh preview" silently did
+  // nothing. A new key forces React to swap in a genuinely fresh <iframe>, which always
+  // does load srcDoc fresh.
+  const [loadSeq, setLoadSeq] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -781,7 +795,10 @@ const BookPreviewPane = forwardRef(function BookPreviewPane({ projectId, reloadK
     setDirty(false);
     bookApi
       .getBookPreview(projectId)
-      .then(({ html }) => setHtml(html))
+      .then(({ html }) => {
+        setHtml(html);
+        setLoadSeq((n) => n + 1);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [projectId]);
@@ -791,17 +808,71 @@ const BookPreviewPane = forwardRef(function BookPreviewPane({ projectId, reloadK
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, reloadKey]);
 
+  // The reader engine (see bookTemplate.js) never shows #source directly — it's
+  // display:none, purely the master copy paginate() clones from. Editing a [data-field]
+  // element you can actually see means editing a CLONE living in #page, and #page's
+  // content isn't even those specific clones kept around: Next/Previous and font-size
+  // changes replay/rebuild it from a `pages[]` array of cached HTML snapshots
+  // (renderPage's `pageEl.innerHTML = pages[currentPage]`), computed by paginate()
+  // straight from #source. So an edit that only touches #page's current clone vanishes
+  // the moment ANYTHING re-renders that page — which used to make every in-preview edit
+  // silently disappear on the next Next/Previous click, or even just get dropped from
+  // Export, since nothing had captured it in the first place once the clone doing the
+  // editing got discarded before Export's applyEdits ran.
+  //
+  // Two things fix that: (1) a delegated listener on `doc` (not per-element — #page's
+  // clones get torn down and rebuilt by paginate(), so a listener attached directly to
+  // one wouldn't survive that) that mirrors every edit straight into #source's own
+  // matching node, which is what paginate() actually reads from; and (2) triggering an
+  // actual repaginate (there's no direct "do it now" hook, so this replays the same
+  // `resize` event bookTemplate.js's own schedulePaginate already listens for) once the
+  // edited field loses focus, so pages[] gets rebuilt from the now-updated #source
+  // before the user can navigate away from it.
   const onIframeLoad = () => {
     const doc = iframeRef.current?.contentDocument;
-    if (!doc) return;
+    const win = iframeRef.current?.contentWindow;
+    if (!doc || !win) return;
+
+    // #source's own [data-field] elements carry contentEditable as a real HTML
+    // attribute once set here — cloneNode (which is all paginate() ever does) copies
+    // attributes, so every future repagination's clones inherit it automatically; this
+    // never needs to run again after this one load.
     doc.querySelectorAll("[data-field]").forEach((el) => {
       el.contentEditable = "true";
       el.spellcheck = false;
-      el.addEventListener("input", () => {
-        editsRef.current[el.getAttribute("data-field")] = el.innerText;
-        setDirty(true);
-      });
     });
+
+    let repaginateTimer = null;
+    const repaginate = () => {
+      clearTimeout(repaginateTimer);
+      win.dispatchEvent(new Event("resize"));
+    };
+
+    doc.addEventListener("input", (e) => {
+      const el = e.target.closest?.("[data-field]");
+      if (!el) return;
+      const field = el.getAttribute("data-field");
+      const text = el.textContent;
+      editsRef.current[field] = text;
+      setDirty(true);
+      const sourceEl = doc.querySelector(`#source [data-field="${field}"]`);
+      if (sourceEl) sourceEl.textContent = text;
+      // Debounced while actively typing — repaginating tears down and rebuilds #page's
+      // DOM wholesale, which would yank focus/cursor out from under an in-progress
+      // edit. The blur listener below covers the normal case (moving to the next
+      // field); this is just a safety net for e.g. clicking Export without blurring.
+      clearTimeout(repaginateTimer);
+      repaginateTimer = setTimeout(repaginate, 800);
+    });
+    // blur doesn't bubble, but IS dispatched during the capturing phase, so a delegated
+    // listener needs capture:true to see it at all.
+    doc.addEventListener(
+      "blur",
+      (e) => {
+        if (e.target.closest?.("[data-field]")) repaginate();
+      },
+      true
+    );
   };
 
   useImperativeHandle(ref, () => ({
@@ -834,6 +905,7 @@ const BookPreviewPane = forwardRef(function BookPreviewPane({ projectId, reloadK
       ) : (
         html && (
           <iframe
+            key={loadSeq}
             ref={iframeRef}
             className="book-preview-frame"
             srcDoc={html}

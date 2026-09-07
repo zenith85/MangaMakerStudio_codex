@@ -806,6 +806,13 @@ const READER_JS = `
   });
 
   window.addEventListener('keydown',(e)=>{
+    // The shipped reader never has a focused editable element (nothing here is ever
+    // contenteditable) — this guard only matters for BookApp.jsx's live preview pane,
+    // where #source's text IS made contenteditable for in-place editing. Without it,
+    // typing a space or using arrow keys while editing a field flips reader pages out
+    // from under you instead of typing the character.
+    const ae=document.activeElement;
+    if(ae && (ae.isContentEditable || ae.tagName==='INPUT' || ae.tagName==='TEXTAREA')) return;
     if(e.key==='ArrowLeft' || e.key==='PageUp') go(-1);
     else if(e.key==='ArrowRight' || e.key==='PageDown' || e.key===' ') go(1);
   });
