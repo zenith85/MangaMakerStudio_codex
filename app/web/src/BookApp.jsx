@@ -76,6 +76,8 @@ export default function BookApp({ onBackToStudios }) {
   const [theme, toggleTheme] = useTheme();
   const { agentStatus, recheckAgent } = useAgentStatus();
   const [books, setBooks] = useState(null); // null = not loaded yet
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState("");
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [book, setBook] = useState(null); // { title, author, language, notes, content, images }
   const [showTerminal, setShowTerminal] = useState(false);
@@ -127,6 +129,23 @@ export default function BookApp({ onBackToStudios }) {
     await bookApi.updateBook(project.id, { title, author, language, notes });
     await refreshBooks();
     openBook(project.id);
+  };
+
+  // Alternative to createBook — reconstructs a whole new project's content/images from
+  // an HTML file this same app previously exported (see bookImport.js), then opens it
+  // straight into the normal editor so any part can be regenerated or edited in place.
+  const importBook = async (file) => {
+    setImportBusy(true);
+    setImportError("");
+    try {
+      const result = await bookApi.importProject(file);
+      await refreshBooks();
+      openBook(result.id);
+    } catch (err) {
+      setImportError(err.message);
+    } finally {
+      setImportBusy(false);
+    }
   };
 
   const deleteBook = async (id, name) => {
@@ -290,6 +309,9 @@ export default function BookApp({ onBackToStudios }) {
           onOpen={openBook}
           onCreate={createBook}
           onDelete={deleteBook}
+          onImport={importBook}
+          importBusy={importBusy}
+          importError={importError}
           theme={theme}
           onToggleTheme={toggleTheme}
           onBackToStudios={onBackToStudios}
@@ -439,13 +461,15 @@ export default function BookApp({ onBackToStudios }) {
   );
 }
 
-function BookLanding({ books, onOpen, onCreate, onDelete, theme, onToggleTheme, onBackToStudios }) {
+function BookLanding({ books, onOpen, onCreate, onDelete, onImport, importBusy, importError, theme, onToggleTheme, onBackToStudios }) {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [language, setLanguage] = useState("English");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const importInputRef = useRef(null);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -458,12 +482,28 @@ function BookLanding({ books, onOpen, onCreate, onDelete, theme, onToggleTheme, 
     }
   };
 
+  const acceptImportFile = (file) => {
+    if (file && /\.html?$/i.test(file.name)) onImport(file);
+  };
+
   if (books === null) {
     return <div className="landing" />; // still loading
   }
 
   return (
-    <div className="landing">
+    <div
+      className={`landing${dragOver ? " landing-drag-over" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        acceptImportFile(e.dataTransfer.files?.[0]);
+      }}
+    >
       <div className="landing-header">
         <div className="landing-header-title">
           <button className="back-link" onClick={onBackToStudios}>
@@ -494,10 +534,29 @@ function BookLanding({ books, onOpen, onCreate, onDelete, theme, onToggleTheme, 
         <button className="project-card project-card-new" onClick={() => setShowForm(true)}>
           +
         </button>
+        <button
+          className="project-card project-card-import"
+          disabled={importBusy}
+          onClick={() => importInputRef.current?.click()}
+          title="Bring back a book this app already exported, to keep editing/regenerating it"
+        >
+          {importBusy ? "Importing…" : "⇪ Import HTML"}
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".html,.htm,text/html"
+          hidden
+          onChange={(e) => {
+            acceptImportFile(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
       </div>
       {books.length === 0 && !showForm && (
-        <p className="empty-hint">No books yet — click + to condense your first one.</p>
+        <p className="empty-hint">No books yet — click + to condense your first one, or drag in an exported HTML to import it.</p>
       )}
+      {importError && <p className="empty-hint error">{importError}</p>}
       {showForm && (
         <form className="new-project-form book-new-form" onSubmit={submit}>
           <input placeholder="Book title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />

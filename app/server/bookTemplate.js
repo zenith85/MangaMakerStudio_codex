@@ -12,7 +12,9 @@
 // measuring rendered height. That engine is unchanged by which book is being rendered;
 // only buildSourceHtml below varies per book.
 
-const LANG_CODES = {
+// Exported for bookImport.js, which reverse-maps a re-imported export's <html lang="">
+// back to one of BookApp.jsx's LANGUAGES options.
+export const LANG_CODES = {
   korean: "ko", english: "en", japanese: "ja", chinese: "zh", "chinese (simplified)": "zh-CN",
   "chinese (traditional)": "zh-TW", spanish: "es", french: "fr", german: "de", portuguese: "pt",
   italian: "it", russian: "ru", arabic: "ar", hindi: "hi", vietnamese: "vi", thai: "th", indonesian: "id",

@@ -66,6 +66,7 @@ import {
 import { generateBookContentViaCodex } from "./bookCodex.js";
 import { buildBookContentPrompt, buildBookCoverImagePrompt, buildBookChapterImagePrompt } from "./bookPrompt.js";
 import { renderBookHtml } from "./bookTemplate.js";
+import { parseBookHtml } from "./bookImport.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
@@ -1141,6 +1142,36 @@ app.post("/api/book-projects", (req, res) => {
   const { name } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: "name is required" });
   res.json(createBookProject(name));
+});
+
+// Creates a whole new book project straight from an HTML file this same app
+// previously exported (see bookImport.js's parseBookHtml) — the "Import HTML" option
+// on the book landing screen (see BookApp.jsx), an alternative to the usual
+// title-then-generate-with-Codex flow when you already have a finished book to bring
+// back in and keep editing/regenerating pieces of.
+app.post("/api/book-projects/import", upload.single("html"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "html file is required" });
+  try {
+    const { content, images, language } = parseBookHtml(req.file.buffer.toString("utf-8"));
+    const name = content.title || req.file.originalname.replace(/\.html?$/i, "") || "Imported book";
+    const project = createBookProject(name);
+
+    const book = getBook(project.id);
+    book.title = content.title || name;
+    book.author = content.author || "";
+    book.language = language;
+    book.content = content;
+    saveBook(project.id, book);
+
+    Object.entries(images).forEach(([imageId, buffer]) => {
+      if (buffer) saveBookImage(project.id, imageId, buffer);
+    });
+
+    res.json({ id: project.id, ...withBookImages(project.id, getBook(project.id)) });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: err.message || "Failed to import this HTML file" });
+  }
 });
 
 app.delete("/api/book-projects/:id", (req, res) => {

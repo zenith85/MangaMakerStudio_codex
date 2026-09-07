@@ -19,6 +19,14 @@ const json = (body) => ({ headers: { "Content-Type": "application/json" }, body:
 export const bookApi = {
   listProjects: () => req("/book-projects"),
   createProject: (name) => req("/book-projects", { method: "POST", ...json({ name }) }),
+  // Creates a whole new project straight from a previously-exported HTML file (see
+  // bookImport.js) — an alternative to createProject + generateBookContent for a book
+  // you already have a finished export of and just want to keep editing/regenerating.
+  importProject: (file) => {
+    const formData = new FormData();
+    formData.append("html", file);
+    return req("/book-projects/import", { method: "POST", body: formData });
+  },
   deleteProject: (id) => req(`/book-projects/${id}`, { method: "DELETE" }),
   openProjectFolder: (id) => req(`/book-projects/${id}/open-folder`, { method: "POST" }),
 
