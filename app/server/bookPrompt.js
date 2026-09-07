@@ -79,12 +79,17 @@ const ILLUSTRATION_STYLE_SUFFIX = {
     "brushwork, literary book-illustration style. No text, no lettering, no panel borders.",
 };
 
-export function buildBookCoverImagePrompt({ title, tagline, style }) {
-  return (
+// imagePrompt is the user's own override (see BookApp.jsx's Cover card — a manual
+// English scene description, the same idea as each chapter's Codex-authored
+// imagePrompt) — when blank, falls back to the auto-built title/tagline scene this
+// always used before that field existed.
+export function buildBookCoverImagePrompt({ title, tagline, style, imagePrompt }) {
+  const scene =
+    imagePrompt?.trim() ||
     `A cover illustration for a book titled "${title}". Mood/theme: ${tagline}. A single evocative image that ` +
-    `captures the book's central image or feeling — no title text, no lettering, no book-cover layout, just the ` +
-    `illustrated scene itself. ${ILLUSTRATION_STYLE_SUFFIX[style] || ILLUSTRATION_STYLE_SUFFIX.bw_illustration}`
-  );
+      `captures the book's central image or feeling — no title text, no lettering, no book-cover layout, just the ` +
+      `illustrated scene itself.`;
+  return `${scene} ${ILLUSTRATION_STYLE_SUFFIX[style] || ILLUSTRATION_STYLE_SUFFIX.bw_illustration}`;
 }
 
 export function buildBookChapterImagePrompt({ imagePrompt, style }) {

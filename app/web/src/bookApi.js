@@ -31,6 +31,19 @@ export const bookApi = {
     req(`/book-projects/${projectId}/book/cover/generate`, { method: "POST", ...json({ style }) }),
   generateBookChapterImage: (projectId, index, style) =>
     req(`/book-projects/${projectId}/book/chapters/${index}/generate`, { method: "POST", ...json({ style }) }),
+  // imageId is "cover" or "chapter-<index>" — same slot naming generate/withBookImages
+  // already use. Drag-and-drop, clipboard-paste, and the plain file picker (see
+  // ImageSlot in BookApp.jsx) all go through this one call.
+  uploadBookImage: (projectId, imageId, file) => {
+    const formData = new FormData();
+    formData.append("image", file);
+    return req(`/book-projects/${projectId}/book/images/${imageId}/upload`, { method: "POST", body: formData });
+  },
+  deleteBookChapter: (projectId, index) =>
+    req(`/book-projects/${projectId}/book/chapters/${index}`, { method: "DELETE" }),
+  // { html } — the same rendered document /export produces, for the live preview pane
+  // (see BookPreviewPane in BookApp.jsx) to load into an iframe.
+  getBookPreview: (projectId) => req(`/book-projects/${projectId}/book/preview`),
   // Not JSON — the export route streams the HTML file itself with download headers, so
   // the caller just needs the URL to point a plain <a href download> at.
   bookExportUrl: (projectId) => `${BASE}/book-projects/${projectId}/book/export`,

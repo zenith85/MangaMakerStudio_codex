@@ -57,6 +57,8 @@ import {
   getBook,
   saveBook,
   saveBookImage,
+  deleteBookImage,
+  renumberChapterImagesAfterDelete,
   loadBookImage,
   bookImageInfo,
   BOOK_PROJECTS_DIR,
@@ -1245,7 +1247,12 @@ app.post("/api/book-projects/:projectId/book/cover/generate", async (req, res) =
     if (!book.content) return res.status(400).json({ error: "generate the book's content first" });
     const style = BOOK_ILLUSTRATION_STYLES.has(req.body?.style) ? req.body.style : "bw_illustration";
 
-    const prompt = buildBookCoverImagePrompt({ title: book.content.title, tagline: book.content.tagline, style });
+    const prompt = buildBookCoverImagePrompt({
+      title: book.content.title,
+      tagline: book.content.tagline,
+      style,
+      imagePrompt: book.content.coverImagePrompt,
+    });
     const outputPath = path.join(BOOK_PROJECTS_DIR, projectId, "book-images", "cover.png");
     const buffer = await generateImageViaCodex(projectId, outputPath, prompt);
     saveBookImage(projectId, "cover", buffer);
@@ -1276,6 +1283,70 @@ app.post("/api/book-projects/:projectId/book/chapters/:index/generate", async (r
     if (err instanceof CodexError) return res.status(502).json({ error: err.message, code: "CODEX_ERROR" });
     res.status(500).json({ error: err.message });
   }
+});
+
+// Manually sets (or replaces) the cover or a chapter's illustration directly, bypassing
+// Codex — same idea as the panel-image upload route above, and the same imageId scheme
+// ("cover" / "chapter-<index>") withBookImages already reads. Drag-and-drop and
+// clipboard-paste onto an ImageSlot (see BookApp.jsx) both funnel through this route.
+app.post("/api/book-projects/:projectId/book/images/:imageId/upload", upload.single("image"), async (req, res) => {
+  const { projectId, imageId } = req.params;
+  const book = getBook(projectId);
+  if (!book.content) return res.status(400).json({ error: "generate the book's content first" });
+  if (imageId !== "cover") {
+    const idx = Number(imageId.replace(/^chapter-/, ""));
+    if (!/^chapter-\d+$/.test(imageId) || !book.content.chapters[idx]) {
+      return res.status(400).json({ error: "invalid image slot" });
+    }
+  }
+  if (!req.file) return res.status(400).json({ error: "image is required" });
+
+  let buffer;
+  try {
+    buffer = await normalizeUploadedImage(req.file.buffer);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  saveBookImage(projectId, imageId, buffer);
+  res.json(withBookImages(projectId, book));
+});
+
+// Removes one chapter entirely (content + its illustration), re-numbering every later
+// chapter's "number" field and shifting their images down one slot to stay attached to
+// the right chapter (see renumberChapterImagesAfterDelete's own comment — chapter images
+// are keyed by array index, not a stable per-chapter id).
+app.delete("/api/book-projects/:projectId/book/chapters/:index", (req, res) => {
+  const { projectId, index } = req.params;
+  const book = getBook(projectId);
+  const idx = Number(index);
+  const chapters = book.content?.chapters;
+  if (!chapters || !Number.isInteger(idx) || idx < 0 || idx >= chapters.length) {
+    return res.status(404).json({ error: "chapter not found" });
+  }
+  const oldCount = chapters.length;
+  book.content.chapters = chapters.filter((_, i) => i !== idx).map((ch, i) => ({ ...ch, number: String(i + 1).padStart(2, "0") }));
+  renumberChapterImagesAfterDelete(projectId, idx, oldCount);
+  saveBook(projectId, book);
+  res.json(withBookImages(projectId, book));
+});
+
+// Same rendered HTML as /export below, minus the download headers and the on-disk
+// copy — for BookApp's live preview pane (see BookPreviewPane in BookApp.jsx), which
+// loads this into an iframe via srcDoc and lets text with a data-field attribute (see
+// bookTemplate.js's block()) be edited in place before Export re-applies those edits to
+// the saved content.
+app.get("/api/book-projects/:projectId/book/preview", (req, res) => {
+  const { projectId } = req.params;
+  const project = getBookProject(projectId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const book = getBook(projectId);
+  if (!book.content) return res.status(400).json({ error: "generate the book's content first" });
+
+  const images = { cover: loadBookImage(projectId, "cover") };
+  book.content.chapters.forEach((_, i) => {
+    images[`chapter-${i}`] = loadBookImage(projectId, `chapter-${i}`);
+  });
+  res.json({ html: renderBookHtml(book.content, images, { language: book.language }) });
 });
 
 app.get("/api/book-projects/:projectId/book/export", (req, res) => {

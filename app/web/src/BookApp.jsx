@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { bookApi } from "./bookApi";
 import { useTheme, ThemeToggle, useAgentStatus, DownloadPrompt, TerminalOverlay } from "./Shared";
 import "./book-app.css";
@@ -27,6 +27,22 @@ function contentToDraft(content) {
   };
 }
 
+// Applies one BookPreviewPane edit back into `content`, immutably, by walking a
+// data-field path like "chapters.2.paragraphs.1.text" or "introSummary.0" — array vs.
+// object indexing is inferred from the value at each step, since content mixes both
+// (e.g. `chapters` is an array, `chapters[i]` is an object, `introSummary` is an array
+// of plain strings).
+function setPath(obj, path, value) {
+  const [key, ...rest] = path.split(".");
+  if (Array.isArray(obj)) {
+    const idx = Number(key);
+    const copy = obj.slice();
+    copy[idx] = rest.length ? setPath(copy[idx], rest.join("."), value) : value;
+    return copy;
+  }
+  return { ...obj, [key]: rest.length ? setPath(obj[key], rest.join("."), value) : value };
+}
+
 function draftToContent(draft, original) {
   return {
     ...original,
@@ -34,6 +50,7 @@ function draftToContent(draft, original) {
     originalTitle: draft.originalTitle,
     author: draft.author,
     tagline: draft.tagline,
+    coverImagePrompt: draft.coverImagePrompt,
     introSummary: draft.introSummary,
     notice: draft.notice,
     chapters: draft.chapters.map((ch, i) => {
@@ -72,13 +89,25 @@ export default function BookApp({ onBackToStudios }) {
   const [folderStatus, setFolderStatus] = useState("");
   const [promptPreview, setPromptPreview] = useState(""); // "" = not shown; set to the actual text sent to Codex
   const [promptBusy, setPromptBusy] = useState(false);
+  // Bumped whenever `book.content` (or its images) just changed on the server, to tell
+  // BookPreviewPane to reload — see its own comment for why this isn't just "reload on
+  // every book state change" (that would wipe out in-progress edits typed into the
+  // preview pane over something unrelated, like a sidebar field's onBlur autosave).
+  const [previewVersion, setPreviewVersion] = useState(0);
+  const [exportBusy, setExportBusy] = useState(false);
+  const previewRef = useRef(null);
 
   const refreshBooks = useCallback(() => bookApi.listProjects().then(setBooks), []);
   useEffect(() => {
     refreshBooks();
   }, [refreshBooks]);
 
-  const refreshBook = useCallback((projectId) => bookApi.getBook(projectId).then(setBook), []);
+  const refreshBook = useCallback((projectId) => {
+    return bookApi.getBook(projectId).then((b) => {
+      setBook(b);
+      if (b.content) setPreviewVersion((v) => v + 1);
+    });
+  }, []);
 
   useEffect(() => {
     if (book?.content) setDraft(contentToDraft(book.content));
@@ -134,6 +163,7 @@ export default function BookApp({ onBackToStudios }) {
     setError("");
     try {
       setBook(await bookApi.generateBookContent(currentProjectId));
+      setPreviewVersion((v) => v + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -146,6 +176,7 @@ export default function BookApp({ onBackToStudios }) {
     setError("");
     try {
       setBook(await bookApi.generateBookCover(currentProjectId, style));
+      setPreviewVersion((v) => v + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -158,6 +189,49 @@ export default function BookApp({ onBackToStudios }) {
     setError("");
     try {
       setBook(await bookApi.generateBookChapterImage(currentProjectId, index, style));
+      setPreviewVersion((v) => v + 1);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setChapterBusy((prev) => ({ ...prev, [index]: false }));
+    }
+  };
+
+  // Manual alternative to generateCover/generateChapterImage above — drag-drop, paste,
+  // or a plain file picker (see ImageSlot) all land here instead of asking Codex.
+  const uploadCoverImage = async (file) => {
+    setCoverBusy(true);
+    setError("");
+    try {
+      setBook(await bookApi.uploadBookImage(currentProjectId, "cover", file));
+      setPreviewVersion((v) => v + 1);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCoverBusy(false);
+    }
+  };
+
+  const uploadChapterImage = async (index, file) => {
+    setChapterBusy((prev) => ({ ...prev, [index]: true }));
+    setError("");
+    try {
+      setBook(await bookApi.uploadBookImage(currentProjectId, `chapter-${index}`, file));
+      setPreviewVersion((v) => v + 1);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setChapterBusy((prev) => ({ ...prev, [index]: false }));
+    }
+  };
+
+  const deleteChapter = async (index, title) => {
+    if (!window.confirm(`Delete chapter${title ? ` "${title}"` : ""}? This can't be undone.`)) return;
+    setChapterBusy((prev) => ({ ...prev, [index]: true }));
+    setError("");
+    try {
+      setBook(await bookApi.deleteBookChapter(currentProjectId, index));
+      setPreviewVersion((v) => v + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -171,10 +245,37 @@ export default function BookApp({ onBackToStudios }) {
     try {
       const content = draftToContent(draft, book.content);
       setBook(await bookApi.updateBook(currentProjectId, { content }));
+      setPreviewVersion((v) => v + 1);
     } catch (err) {
       setError(err.message);
     } finally {
       setSaveBusy(false);
+    }
+  };
+
+  // Applies any in-place edits sitting in the preview pane (see BookPreviewPane) to the
+  // saved content first, so the download that follows reflects them — then triggers the
+  // same file the old plain <a href download> did, just via a synthetic click so this
+  // can await the save first.
+  const exportBook = async () => {
+    setExportBusy(true);
+    setError("");
+    try {
+      const updated = previewRef.current?.applyEdits(book.content);
+      if (updated) {
+        setBook(await bookApi.updateBook(currentProjectId, { content: updated }));
+        setPreviewVersion((v) => v + 1);
+      }
+      const a = document.createElement("a");
+      a.href = bookApi.bookExportUrl(currentProjectId);
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportBusy(false);
     }
   };
 
@@ -268,15 +369,15 @@ export default function BookApp({ onBackToStudios }) {
               </select>
             </label>
             {book.content && (
-              <a className="primary book-export-link" href={bookApi.bookExportUrl(currentProjectId)} download>
-                ⬇ Export as HTML
-              </a>
+              <button className="primary book-export-link" disabled={exportBusy} onClick={exportBook}>
+                {exportBusy ? "Exporting…" : "⬇ Export as HTML"}
+              </button>
             )}
           </div>
         )}
       </aside>
 
-      <main className="main book-main">
+      <main className={`main book-main${book?.content ? " book-main-split" : ""}`}>
         {error && <p className="empty-hint error">{error}</p>}
 
         {!book ? (
@@ -306,19 +407,29 @@ export default function BookApp({ onBackToStudios }) {
           </div>
         ) : (
           draft && (
-            <BookEditor
-              draft={draft}
-              setDraft={setDraft}
-              book={book}
-              coverBusy={coverBusy}
-              chapterBusy={chapterBusy}
-              saveBusy={saveBusy}
-              onGenerateCover={generateCover}
-              onGenerateChapterImage={generateChapterImage}
-              onSave={saveContent}
-              onRegenerateContent={generateContent}
-              contentBusy={contentBusy}
-            />
+            <div className="book-split">
+              <div className="book-split-col book-split-left">
+                <BookEditor
+                  draft={draft}
+                  setDraft={setDraft}
+                  book={book}
+                  coverBusy={coverBusy}
+                  chapterBusy={chapterBusy}
+                  saveBusy={saveBusy}
+                  onGenerateCover={generateCover}
+                  onGenerateChapterImage={generateChapterImage}
+                  onUploadCoverImage={uploadCoverImage}
+                  onUploadChapterImage={uploadChapterImage}
+                  onDeleteChapter={deleteChapter}
+                  onSave={saveContent}
+                  onRegenerateContent={generateContent}
+                  contentBusy={contentBusy}
+                />
+              </div>
+              <div className="book-split-col book-split-right">
+                <BookPreviewPane ref={previewRef} projectId={currentProjectId} reloadKey={previewVersion} />
+              </div>
+            </div>
           )
         )}
       </main>
@@ -416,7 +527,8 @@ function BookLanding({ books, onOpen, onCreate, onDelete, theme, onToggleTheme, 
 
 function BookEditor({
   draft, setDraft, book, coverBusy, chapterBusy, saveBusy,
-  onGenerateCover, onGenerateChapterImage, onSave, onRegenerateContent, contentBusy,
+  onGenerateCover, onGenerateChapterImage, onUploadCoverImage, onUploadChapterImage, onDeleteChapter,
+  onSave, onRegenerateContent, contentBusy,
 }) {
   const setField = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
   const setChapterField = (index, key, value) =>
@@ -452,7 +564,13 @@ function BookEditor({
       <section className="book-card">
         <h2>Cover</h2>
         <div className="book-card-body">
-          <ImageSlot url={book.images.cover.imageUrl} busy={coverBusy} onGenerate={onGenerateCover} label="cover" />
+          <ImageSlot
+            url={book.images.cover.imageUrl}
+            busy={coverBusy}
+            onGenerate={onGenerateCover}
+            onUpload={onUploadCoverImage}
+            label="cover"
+          />
           <div className="book-card-fields">
             <label>
               Title
@@ -469,6 +587,15 @@ function BookEditor({
             <label>
               Tagline
               <input value={draft.tagline} onChange={(e) => setField("tagline", e.target.value)} />
+            </label>
+            <label>
+              Cover illustration prompt (English, optional — leave blank to auto-generate from title/tagline)
+              <textarea
+                rows={2}
+                placeholder="e.g. A lone lighthouse on a storm-lit cliff, waves crashing below…"
+                value={draft.coverImagePrompt || ""}
+                onChange={(e) => setField("coverImagePrompt", e.target.value)}
+              />
             </label>
             <label>
               Intro — part 1
@@ -488,14 +615,26 @@ function BookEditor({
 
       {draft.chapters.map((ch, i) => (
         <section className="book-card" key={i}>
-          <h2>
-            Chapter {ch.number} — {ch.title || "Untitled"}
-          </h2>
+          <div className="book-card-header">
+            <h2>
+              Chapter {ch.number} — {ch.title || "Untitled"}
+            </h2>
+            <button
+              type="button"
+              className="delete book-chapter-delete"
+              title="Delete this chapter"
+              disabled={!!chapterBusy[i]}
+              onClick={() => onDeleteChapter(i, ch.title)}
+            >
+              ×
+            </button>
+          </div>
           <div className="book-card-body">
             <ImageSlot
               url={book.images[`chapter-${i}`]?.imageUrl}
               busy={!!chapterBusy[i]}
               onGenerate={() => onGenerateChapterImage(i)}
+              onUpload={(file) => onUploadChapterImage(i, file)}
               label={`chapter ${ch.number}`}
             />
             <div className="book-card-fields">
@@ -561,13 +700,149 @@ function BookEditor({
   );
 }
 
-function ImageSlot({ url, busy, onGenerate, label }) {
+// Renders the actual exported HTML (same document /export downloads) live, in an
+// iframe, with every data-field-tagged text node (see bookTemplate.js's block()) made
+// directly editable — so you can read the real "10-minute read" layout instead of the
+// form on the left, and fix a word or a line right where you see it. Edits sit only in
+// the iframe's own DOM until applyEdits() is called (by BookApp's exportBook, and only
+// then) — nothing here saves on its own, and reloading the preview (reloadKey bumping,
+// or the Refresh button) discards whatever hasn't been applied yet.
+const BookPreviewPane = forwardRef(function BookPreviewPane({ projectId, reloadKey }, ref) {
+  const [html, setHtml] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const iframeRef = useRef(null);
+  const editsRef = useRef({}); // data-field path -> edited text, accumulated since the last load/apply
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError("");
+    editsRef.current = {};
+    setDirty(false);
+    bookApi
+      .getBookPreview(projectId)
+      .then(({ html }) => setHtml(html))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, reloadKey]);
+
+  const onIframeLoad = () => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    doc.querySelectorAll("[data-field]").forEach((el) => {
+      el.contentEditable = "true";
+      el.spellcheck = false;
+      el.addEventListener("input", () => {
+        editsRef.current[el.getAttribute("data-field")] = el.innerText;
+        setDirty(true);
+      });
+    });
+  };
+
+  useImperativeHandle(ref, () => ({
+    // Folds every pending edit into `content` (immutably) and returns the result, or
+    // null if nothing was edited — the caller (BookApp's exportBook) only saves when
+    // this returns non-null, so exporting with no preview edits doesn't touch the book.
+    applyEdits(content) {
+      const paths = Object.keys(editsRef.current);
+      if (!paths.length) return null;
+      let updated = content;
+      for (const path of paths) updated = setPath(updated, path, editsRef.current[path]);
+      editsRef.current = {};
+      setDirty(false);
+      return updated;
+    },
+  }));
+
   return (
-    <div className="book-image-slot">
-      {url ? <img src={url} alt="" /> : <div className="book-image-slot-placeholder">No image yet</div>}
+    <div className="book-preview-pane">
+      <div className="book-preview-toolbar">
+        <span className="book-preview-hint">Click any text below to edit it — Export saves those edits too.</span>
+        {dirty && <span className="book-preview-dirty">Unsaved edits here</span>}
+        <button type="button" onClick={load} disabled={loading}>
+          ↻ Refresh preview
+        </button>
+      </div>
+      {error && <p className="empty-hint error">{error}</p>}
+      {loading && !html ? (
+        <p className="empty-hint">Loading preview…</p>
+      ) : (
+        html && (
+          <iframe
+            ref={iframeRef}
+            className="book-preview-frame"
+            srcDoc={html}
+            onLoad={onIframeLoad}
+            title="Book preview"
+          />
+        )
+      )}
+    </div>
+  );
+});
+
+// Accepts an image three ways besides the Generate/Redraw button: dropping a file onto
+// it, pasting one from the clipboard (click the slot first so it has focus — a paste
+// event only fires on whatever currently does), or the plain file picker. All three
+// funnel into the same onUpload(file), which just uploads it as-is (see BookApp's
+// uploadCoverImage/uploadChapterImage — the server re-encodes it to PNG either way).
+function ImageSlot({ url, busy, onGenerate, onUpload, label }) {
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const acceptFile = (file) => {
+    if (file && file.type.startsWith("image/")) onUpload(file);
+  };
+
+  return (
+    <div
+      className={`book-image-slot${dragOver ? " drag-over" : ""}`}
+      tabIndex={0}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        acceptFile(e.dataTransfer.files?.[0]);
+      }}
+      onPaste={(e) => {
+        const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith("image/"));
+        if (item) {
+          e.preventDefault();
+          acceptFile(item.getAsFile());
+        }
+      }}
+    >
+      {url ? (
+        <img src={url} alt="" />
+      ) : (
+        <div className="book-image-slot-placeholder">Drag, paste, or generate an image</div>
+      )}
       <button disabled={busy} onClick={onGenerate}>
-        {busy ? "Generating… (watch the terminal)" : url ? `↻ Redraw ${label}` : `Generate ${label}`}
+        {busy ? "Working… (watch the terminal)" : url ? `↻ Redraw ${label}` : `Generate ${label}`}
       </button>
+      <button type="button" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+        Upload image…
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          acceptFile(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }

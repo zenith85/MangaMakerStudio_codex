@@ -132,6 +132,28 @@ export function loadBookImage(projectId, imageId) {
   return fs.existsSync(p) ? fs.readFileSync(p) : null;
 }
 
+export function deleteBookImage(projectId, imageId) {
+  const p = bookImagePath(projectId, imageId);
+  if (fs.existsSync(p)) fs.rmSync(p);
+}
+
+// Chapter images are keyed purely by their chapter's array index (chapter-0, chapter-1,
+// ...) — there's no separate per-chapter id (see index.js's DELETE chapter route). So
+// removing chapter `deletedIndex` from an `oldCount`-long array means every later
+// chapter's image has to shift down one slot to stay attached to the right chapter,
+// exactly the way its content already does via Array.filter. Copies rather than moves,
+// so a missing source (a chapter whose image was never generated) correctly clears the
+// destination too, instead of leaving a stale image behind from what used to be there.
+export function renumberChapterImagesAfterDelete(projectId, deletedIndex, oldCount) {
+  for (let k = deletedIndex; k <= oldCount - 2; k++) {
+    const src = bookImagePath(projectId, `chapter-${k + 1}`);
+    const dest = bookImagePath(projectId, `chapter-${k}`);
+    if (fs.existsSync(src)) fs.copyFileSync(src, dest);
+    else if (fs.existsSync(dest)) fs.rmSync(dest);
+  }
+  deleteBookImage(projectId, `chapter-${oldCount - 1}`); // now-orphaned last slot
+}
+
 // mtime cache-busting — a redraw overwrites the same filename, so without a
 // version query the browser would just keep serving its cached copy of the old image.
 export function bookImageInfo(projectId, imageId) {

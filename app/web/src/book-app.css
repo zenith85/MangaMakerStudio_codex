@@ -74,19 +74,108 @@
 
 .book-export-link {
   display: block;
+  width: 100%;
   text-align: center;
   text-decoration: none;
   margin-top: 4px;
   background: #4a5cff;
   color: white;
   padding: 10px;
+  border: none;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.book-export-link:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .book-main {
   max-width: 900px;
+}
+
+/* Overrides .book-main's max-width once there's content to show the split editor —
+   the two-column layout (form on the left, live HTML preview on the right, see
+   BookPreviewPane) needs the full available width instead of staying centered/narrow. */
+.book-main-split {
+  max-width: none;
+  width: 100%;
+}
+
+.book-split {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.book-split-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Both columns scroll independently, each pinned to the viewport height minus roughly
+   the app header/toolbar above them, so editing a field on the left and checking the
+   preview on the right never means losing your scroll position in either one. */
+.book-split-left,
+.book-split-right {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.book-preview-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+
+.book-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-canvas);
+  padding: 8px 0;
+  z-index: 1;
+}
+
+.book-preview-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.book-preview-dirty {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5b942;
+  white-space: nowrap;
+}
+
+.book-preview-toolbar button {
+  width: auto;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.book-preview-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 640px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #fff;
 }
 
 .book-generate-prompt {
@@ -186,6 +275,41 @@
   font-size: 15px;
 }
 
+.book-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.book-card-header h2 {
+  margin: 0 0 12px;
+}
+
+.book-chapter-delete {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.book-chapter-delete:hover {
+  color: #ff8a8a;
+  border-color: #ff8a8a;
+}
+
+.book-chapter-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .book-card-body {
   display: flex;
   gap: 18px;
@@ -253,6 +377,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border-radius: 10px;
+  outline: 2px solid transparent;
+  outline-offset: 4px;
+  transition: outline-color 0.1s ease;
+}
+
+/* Dropping a file over the slot, or focusing it (click, then paste) — same treatment
+   for both since either is "this slot is about to receive an image". */
+.book-image-slot.drag-over,
+.book-image-slot:focus {
+  outline-color: #4a5cff;
+}
+.book-image-slot:focus {
+  outline-style: dashed;
 }
 
 .book-image-slot img {

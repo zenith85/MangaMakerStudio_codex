@@ -43,21 +43,29 @@ function buildSource(content, images) {
   const expected = {};
   const parts = [];
 
-  const block = (tag, cls, text, { breakBefore = false, extraAttrs = "" } = {}) => {
+  // field, when given, is a dot-path into `content` (e.g. "chapters.2.lead") — baked in
+  // as data-field purely as inert metadata for the frontend's live-preview editor (see
+  // BookApp.jsx's BookPreviewPane), which reads it back to know which piece of `content`
+  // a contenteditable edit belongs to. Unused by the reader engine itself, and present in
+  // the exported file too (harmless — nothing there depends on the absence of an
+  // unrecognized attribute).
+  const block = (tag, cls, text, { breakBefore = false, extraAttrs = "", field } = {}) => {
     const s = nextSeq();
     expected[s] = String(text ?? "");
-    const attrs = `${breakBefore ? ' data-break-before="always"' : ""} data-seq="${s}"${extraAttrs}`;
+    const fieldAttr = field ? ` data-field="${esc(field)}"` : "";
+    const attrs = `${breakBefore ? ' data-break-before="always"' : ""} data-seq="${s}"${fieldAttr}${extraAttrs}`;
     parts.push(`<${tag} class="${cls}"${attrs}>${esc(text)}</${tag}>`);
   };
 
-  const figure = (cls, imageId, caption, { cover = false } = {}) => {
+  const figure = (cls, imageId, caption, { cover = false, captionField } = {}) => {
     const uri = images[imageId];
     if (!uri) return; // no image generated yet for this slot — skip the figure entirely
     const captionHtml = caption
       ? (() => {
           const s = nextSeq();
           expected[s] = String(caption);
-          return `<figcaption data-seq="${s}">${esc(caption)}</figcaption>`;
+          const fieldAttr = captionField ? ` data-field="${esc(captionField)}"` : "";
+          return `<figcaption data-seq="${s}"${fieldAttr}>${esc(caption)}</figcaption>`;
         })()
       : "";
     const coverAttr = cover ? ' data-cover-figure="true"' : "";
@@ -67,43 +75,43 @@ function buildSource(content, images) {
     );
   };
 
-  block("div", "cover-kicker", content.kicker, { breakBefore: false });
-  block("h1", "cover-title", content.title);
+  block("div", "cover-kicker", content.kicker, { breakBefore: false, field: "kicker" });
+  block("h1", "cover-title", content.title, { field: "title" });
   if (content.originalTitle && content.originalTitle.trim() && content.originalTitle.trim() !== content.title.trim()) {
-    block("div", "cover-original", content.originalTitle);
+    block("div", "cover-original", content.originalTitle, { field: "originalTitle" });
   }
-  block("div", "cover-author", content.author);
+  block("div", "cover-author", content.author, { field: "author" });
   figure("cover-figure", "cover", null, { cover: true });
-  block("p", "cover-tagline", content.tagline);
+  block("p", "cover-tagline", content.tagline, { field: "tagline" });
 
-  block("h2", "intro-title", content.introTitle, { breakBefore: true });
-  block("div", "intro-author", content.introAuthor);
-  block("p", "intro-summary intro-part", content.introSummary[0]);
-  block("p", "intro-summary intro-last", content.introSummary[1]);
+  block("h2", "intro-title", content.introTitle, { breakBefore: true, field: "introTitle" });
+  block("div", "intro-author", content.introAuthor, { field: "introAuthor" });
+  block("p", "intro-summary intro-part", content.introSummary[0], { field: "introSummary.0" });
+  block("p", "intro-summary intro-last", content.introSummary[1], { field: "introSummary.1" });
 
-  block("h2", "toc-title", content.tocTitle);
-  for (const item of content.toc) block("div", "toc-item", item);
-  block("p", "notice", content.notice);
+  block("h2", "toc-title", content.tocTitle, { field: "tocTitle" });
+  content.toc.forEach((item, i) => block("div", "toc-item", item, { field: `toc.${i}` }));
+  block("p", "notice", content.notice, { field: "notice" });
 
   content.chapters.forEach((chapter, i) => {
-    block("div", "chapter-number", chapter.number, { breakBefore: true });
-    block("h2", "chapter-title", chapter.title);
-    block("p", "chapter-lead", chapter.lead);
-    for (const para of chapter.paragraphs) {
+    block("div", "chapter-number", chapter.number, { breakBefore: true, field: `chapters.${i}.number` });
+    block("h2", "chapter-title", chapter.title, { field: `chapters.${i}.title` });
+    block("p", "chapter-lead", chapter.lead, { field: `chapters.${i}.lead` });
+    chapter.paragraphs.forEach((para, j) => {
       const cls = para.type === "quote" ? "body-text quote" : "body-text";
-      block("p", cls, para.text);
-    }
-    figure("reader-figure", `chapter-${i}`, chapter.imageCaption);
+      block("p", cls, para.text, { field: `chapters.${i}.paragraphs.${j}.text` });
+    });
+    figure("reader-figure", `chapter-${i}`, chapter.imageCaption, { captionField: `chapters.${i}.imageCaption` });
   });
 
-  block("h2", "closing-title", content.closing.title, { breakBefore: true });
-  block("p", "closing-lead", content.closing.lead);
-  for (const section of content.closing.sections) {
-    block("h3", "analysis-subhead", section.subhead);
-    block("p", "body-text", section.text);
-  }
-  block("h3", "question-title", content.closing.questionTitle, { breakBefore: true });
-  block("p", "question-text", content.closing.questionText);
+  block("h2", "closing-title", content.closing.title, { breakBefore: true, field: "closing.title" });
+  block("p", "closing-lead", content.closing.lead, { field: "closing.lead" });
+  content.closing.sections.forEach((section, i) => {
+    block("h3", "analysis-subhead", section.subhead, { field: `closing.sections.${i}.subhead` });
+    block("p", "body-text", section.text, { field: `closing.sections.${i}.text` });
+  });
+  block("h3", "question-title", content.closing.questionTitle, { breakBefore: true, field: "closing.questionTitle" });
+  block("p", "question-text", content.closing.questionText, { field: "closing.questionText" });
 
   return { sourceHtml: parts.join("\n"), expected };
 }
