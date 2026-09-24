@@ -952,10 +952,10 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     const { pages, page, panel } = findPanel(projectId, pageId, panelId);
     if (!panel) return res.status(404).json({ error: "panel not found" });
 
-    // poseSketch/lastPageId are one-shot inputs for THIS generation only — pulled out
-    // before the Object.assign below (which persists everything else in the body, e.g.
-    // sceneDoc), since neither belongs permanently on the panel itself.
-    const { poseSketch, lastPageId, ...panelPatch } = req.body;
+    // poseSketch/lastPageId/previousPanel are one-shot inputs for THIS generation only —
+    // pulled out before the Object.assign below (which persists everything else in the
+    // body, e.g. sceneDoc), since none belong permanently on the panel itself.
+    const { poseSketch, lastPageId, previousPanel, ...panelPatch } = req.body;
     Object.assign(panel, panelPatch); // sceneDoc
     savePages(projectId, pages);
 
@@ -991,6 +991,13 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
     // frontend didn't ask for one (toggle off, or there's no previous page) or that
     // page has no panel images yet to composite.
     const lastPageThumbnail = lastPageId ? await composePageThumbnail(projectId, lastPageId) : null;
+    // "Reference previous panel" (same Scene tab) — the image of the panel right before
+    // this one, for tighter shot-to-shot continuity than the whole-page composite. null
+    // if not asked for, or that panel has no image yet.
+    const previousPanelImage =
+      previousPanel?.pageId && previousPanel?.panelId
+        ? loadPanelImage(projectId, previousPanel.pageId, previousPanel.panelId)
+        : null;
     const poseSketchBuffer = decodeDataUrl(poseSketch);
     const referenceImages = [
       ...characters.map((c) => loadEntityImage(projectId, "characters", c.id)).filter(Boolean),
@@ -999,8 +1006,10 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       ...references.map((r) => loadEntityImage(projectId, "references", r.id)).filter(Boolean),
       ...continuityPanels.map((p) => loadPanelImage(projectId, p.pageId, p.panelId)).filter(Boolean),
       // Always in this order, always LAST(-ish) — see buildPrompt's hasLastPageThumbnail/
-      // hasPoseSketch notes, which describe these two by exact trailing position.
+      // hasPreviousPanelImage/hasPoseSketch notes, which describe these by exact trailing
+      // position.
       ...(lastPageThumbnail ? [lastPageThumbnail] : []),
+      ...(previousPanelImage ? [previousPanelImage] : []),
       ...(poseSketchBuffer ? [poseSketchBuffer] : []),
     ];
 
@@ -1013,6 +1022,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/generate", asyn
       continuityPanels,
       stylePreset: page.stylePreset,
       hasLastPageThumbnail: !!lastPageThumbnail,
+      hasPreviousPanelImage: !!previousPanelImage,
       hasPoseSketch: !!poseSketchBuffer,
     });
 

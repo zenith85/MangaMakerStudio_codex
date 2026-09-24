@@ -1506,6 +1506,24 @@ export default function App() {
   // Every panel across every page in the project, for the scene editor's #mention list
   // (continuity references aren't limited to the current page). `currentPage` stands in
   // for its own entry in `pages` so its panels are never stale mid-edit.
+  // The panel right before `panel` in reading order, for "Reference previous panel" —
+  // the grid slot before it on this page, or the last grid panel of the previous page
+  // when it's the first one. Floating panels sit outside the reading order, so they get
+  // none. Only returned when it actually has an image to reference.
+  const previousPanelFor = (panel) => {
+    if (!panel || panel.floating || !currentPage) return null;
+    let prev = null;
+    let prevPageId = currentPage.id;
+    if (panel.order > 0) {
+      prev = currentPage.panels.find((p) => p.order === panel.order - 1);
+    } else if (currentPageIndex > 0) {
+      const prevPage = pages[currentPageIndex - 1];
+      prev = prevPage.panels.reduce((a, b) => (!a || b.order > a.order ? b : a), null);
+      prevPageId = prevPage.id;
+    }
+    return prev?.hasImage ? { pageId: prevPageId, panelId: prev.id } : null;
+  };
+
   const allPanelsForMention = pages
     .map((p) => (p.id === currentPage?.id ? currentPage : p))
     .flatMap((p) => p.panels.map((panel) => ({ ...panel, pageTitle: p.title })));
@@ -1681,6 +1699,7 @@ export default function App() {
           references={entities.references}
           allPanels={allPanelsForMention}
           previousPageId={currentPageIndex > 0 ? pages[currentPageIndex - 1].id : null}
+          previousPanel={previousPanelFor(selectedPanel)}
           onClose={() => setSelectedPanelId(null)}
           onUpdated={refreshCurrentPage}
           onDelete={deletePanel}
@@ -4433,6 +4452,7 @@ function PanelEditor({
   references,
   allPanels,
   previousPageId,
+  previousPanel,
   onClose,
   onUpdated,
   onDelete,
@@ -4497,6 +4517,9 @@ function PanelEditor({
   // positions without the user having to describe "the environment" by hand each time.
   // Ephemeral, same as poseSketch — nothing here is saved to the panel.
   const [referenceLastPage, setReferenceLastPage] = useState(false);
+  // "Reference previous panel" — same idea, but hands Codex just the image of the panel
+  // right before this one (see previousPanelFor), for tighter shot-to-shot continuity.
+  const [referencePreviousPanel, setReferencePreviousPanel] = useState(false);
   // Live value while dragging the zoom slider or typing in either number box — null
   // means "not editing, show the committed panel value instead" (see the inputs below).
   const [zoomDraft, setZoomDraft] = useState(null);
@@ -4535,7 +4558,8 @@ function PanelEditor({
     setError("");
     try {
       const lastPageId = referenceLastPage && previousPageId ? previousPageId : undefined;
-      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc, poseSketch, lastPageId });
+      const prevPanel = referencePreviousPanel && previousPanel ? previousPanel : undefined;
+      await api.generatePanel(projectId, page.id, panel.id, { sceneDoc, poseSketch, lastPageId, previousPanel: prevPanel });
       await onUpdated();
     } catch (err) {
       setError(err.message);
@@ -5198,6 +5222,27 @@ function PanelEditor({
               disabled={!previousPageId}
               className={`tail-toggle-switch${referenceLastPage ? " on" : ""}`}
               onClick={() => setReferenceLastPage((v) => !v)}
+            >
+              <span className="tail-toggle-knob" />
+            </button>
+          </label>
+
+          <label
+            className="tail-toggle reference-last-page-toggle"
+            title={
+              previousPanel
+                ? "Hand Codex the image of the panel right before this one, so this shot follows on from it"
+                : "The previous panel has no image yet (or this is a floating panel)"
+            }
+          >
+            <span className="tail-toggle-label">Reference previous panel</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={referencePreviousPanel}
+              disabled={!previousPanel}
+              className={`tail-toggle-switch${referencePreviousPanel ? " on" : ""}`}
+              onClick={() => setReferencePreviousPanel((v) => !v)}
             >
               <span className="tail-toggle-knob" />
             </button>

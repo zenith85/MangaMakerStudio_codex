@@ -75,12 +75,14 @@ export function describeReferencedEntities({ characters = [], places = [], objec
   return parts;
 }
 
-// hasLastPageThumbnail/hasPoseSketch: the caller (see index.js's /generate route)
-// always appends these, when present, in this fixed order — last-page thumbnail first,
-// then the pose sketch — after every entity/continuity image already pushed by
-// describeReferencedEntities. Described here by exact position (LAST vs.
-// SECOND-TO-LAST) rather than generically, since there are only ever these two optional
-// trailing images to account for.
+// hasLastPageThumbnail/hasPreviousPanelImage/hasPoseSketch: the caller (see index.js's
+// /generate route) always appends these, when present, in this fixed order — last-page
+// thumbnail, then previous-panel image, then the pose sketch — after every
+// entity/continuity image already pushed by describeReferencedEntities. Described here
+// by exact trailing position (LAST, SECOND-TO-LAST, ...) rather than generically, since
+// these are the only optional trailing images to account for.
+const TRAILING_ORDINALS = ["LAST", "SECOND-TO-LAST", "THIRD-TO-LAST"];
+
 export function buildPrompt({
   sceneDescription,
   characters,
@@ -90,14 +92,23 @@ export function buildPrompt({
   continuityPanels = [],
   stylePreset,
   hasLastPageThumbnail = false,
+  hasPreviousPanelImage = false,
   hasPoseSketch = false,
 }) {
   const parts = [sceneDescription?.trim() || "A manga panel."];
   parts.push(...describeReferencedEntities({ characters, places, objects, references, continuityPanels }));
-  const lastPageOrdinal = hasPoseSketch ? "SECOND-TO-LAST" : "LAST";
+  // Position counted from the end: each optional image that comes AFTER a given one
+  // pushes it one further from LAST.
+  const lastPageOrdinal = TRAILING_ORDINALS[(hasPreviousPanelImage ? 1 : 0) + (hasPoseSketch ? 1 : 0)];
+  const previousPanelOrdinal = TRAILING_ORDINALS[hasPoseSketch ? 1 : 0];
   if (hasLastPageThumbnail) {
     parts.push(
       `The ${lastPageOrdinal} attached reference image is a small composite of every panel on the PREVIOUS page, for overall scene/environment continuity — matching things like the setting, lighting, and where characters/objects are positioned when the new scene follows on from it. It is just visual context, not a layout to copy: do not reproduce its grid of panels, borders, or composition in your output.`
+    );
+  }
+  if (hasPreviousPanelImage) {
+    parts.push(
+      `The ${previousPanelOrdinal} attached reference image is the panel that comes IMMEDIATELY BEFORE this one in the story, for shot-to-shot continuity — keep the same characters' appearance and clothing, the same setting, lighting, and props, and have this panel follow on naturally from that moment. It is context only, not an image to copy: compose this panel fresh according to its own description rather than reproducing that panel's framing.`
     );
   }
   if (hasPoseSketch) {
