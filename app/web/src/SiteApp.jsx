@@ -21,6 +21,7 @@ import {
   colStyle,
 } from "./siteRender";
 import { SITE_TEMPLATES } from "./siteTemplates";
+import { LangProvider, LangToggle, useT } from "./siteI18n";
 import "./site-app.css";
 
 // Site Builder — a third studio: build a single web page by dragging rows (column
@@ -29,7 +30,18 @@ import "./site-app.css";
 // file (images embedded) — the same shape as the PageBox collection pages it's modeled
 // on. All rendering lives in siteRender.js, shared by the canvas and the export.
 
-export default function SiteApp({ onBackToStudios }) {
+// The interface language (English / 한국어, see siteI18n.jsx) is chosen per browser and
+// covers this whole studio, so the provider sits at its root.
+export default function SiteApp(props) {
+  return (
+    <LangProvider>
+      <SiteAppInner {...props} />
+    </LangProvider>
+  );
+}
+
+function SiteAppInner({ onBackToStudios }) {
+  const t = useT();
   const [theme, toggleTheme] = useTheme();
   const { agentStatus, recheckAgent } = useAgentStatus();
   const [sites, setSites] = useState(null); // null = not loaded yet
@@ -41,19 +53,19 @@ export default function SiteApp({ onBackToStudios }) {
   }, [agentStatus, refreshSites]);
 
   const createSite = async (name, templateId) => {
-    const template = SITE_TEMPLATES.find((t) => t.id === templateId) || SITE_TEMPLATES[0];
+    const template = SITE_TEMPLATES.find((tpl) => tpl.id === templateId) || SITE_TEMPLATES[0];
     const project = await siteApi.createProject(name, template.build(name));
     await refreshSites();
     setCurrent({ id: project.id, name: project.name });
   };
 
   const deleteSite = async (id, name) => {
-    if (!window.confirm(`Delete "${name}" and everything in it? This can't be undone.`)) return;
+    if (!window.confirm(t('Delete "{name}" and everything in it? This can\'t be undone.', { name }))) return;
     await siteApi.deleteProject(id);
     await refreshSites();
   };
 
-  if (agentStatus === "checking") return <div className="agent-checking">Checking for local agent…</div>;
+  if (agentStatus === "checking") return <div className="agent-checking">{t("Checking for local agent…")}</div>;
   if (agentStatus === "offline") return <DownloadPrompt onRetry={recheckAgent} />;
 
   if (!current) {
@@ -86,6 +98,7 @@ export default function SiteApp({ onBackToStudios }) {
 }
 
 function SiteLanding({ sites, onOpen, onCreate, onDelete, theme, onToggleTheme, onBackToStudios }) {
+  const t = useT();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [templateId, setTemplateId] = useState("collection");
@@ -112,11 +125,14 @@ function SiteLanding({ sites, onOpen, onCreate, onDelete, theme, onToggleTheme, 
       <div className="landing-header">
         <div className="site-landing-title">
           <button className="back-link" onClick={onBackToStudios}>
-            ← Studios
+            {t("← Studios")}
           </button>
-          <h1>Site Builder</h1>
+          <h1>{t("Site Builder")}</h1>
         </div>
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        <span className="site-landing-controls">
+          <LangToggle />
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} titles={{ toLight: t("Switch to light mode"), toDark: t("Switch to dark mode") }} />
+        </span>
       </div>
       <div className="project-grid">
         {sites.map((s) => (
@@ -126,7 +142,7 @@ function SiteLanding({ sites, onOpen, onCreate, onDelete, theme, onToggleTheme, 
             </button>
             <button
               className="project-card-delete"
-              title={`Delete ${s.name}`}
+              title={t("Delete {name}", { name: s.name })}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(s.id, s.name);
@@ -140,25 +156,25 @@ function SiteLanding({ sites, onOpen, onCreate, onDelete, theme, onToggleTheme, 
           +
         </button>
       </div>
-      {sites.length === 0 && !showForm && <p className="empty-hint">No sites yet — click + to start one.</p>}
+      {sites.length === 0 && !showForm && <p className="empty-hint">{t("No sites yet — click + to start one.")}</p>}
       {showForm && (
         <form className="site-new-form" onSubmit={submit}>
-          <input placeholder="Site name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <input placeholder={t("Site name")} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           <div className="site-template-grid">
-            {SITE_TEMPLATES.map((t) => (
+            {SITE_TEMPLATES.map((tpl) => (
               <button
                 type="button"
-                key={t.id}
-                className={`site-template-card${templateId === t.id ? " active" : ""}`}
-                onClick={() => setTemplateId(t.id)}
+                key={tpl.id}
+                className={`site-template-card${templateId === tpl.id ? " active" : ""}`}
+                onClick={() => setTemplateId(tpl.id)}
               >
-                <strong>{t.label}</strong>
-                <span>{t.desc}</span>
+                <strong>{t(tpl.label)}</strong>
+                <span>{t(tpl.desc)}</span>
               </button>
             ))}
           </div>
           <button type="submit" className="primary" disabled={busy || !name.trim()}>
-            {busy ? "Creating…" : "Create"}
+            {busy ? t("Creating…") : t("Create")}
           </button>
           {error && <p className="empty-hint site-error">{error}</p>}
         </form>
@@ -230,6 +246,7 @@ const SAVE_DEBOUNCE_MS = 500;
 const COALESCE_MS = 1000;
 
 function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
+  const t = useT();
   const [site, setSiteState] = useState(null);
   const siteRef = useRef(null);
   // Undo/redo stacks of whole-site snapshots. Typing into one inspector field commits
@@ -265,7 +282,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
       setSaveState("saved");
     } catch (err) {
       setSaveState("error");
-      setError(`Couldn't save: ${err.message}`);
+      setError(t("Couldn't save: {message}", { message: err.message }));
     }
   }, [projectId]);
 
@@ -341,7 +358,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
       const results = await Promise.all(images.map((f) => siteApi.uploadAsset(projectId, f)));
       return results.map((r) => r.url);
     } catch (err) {
-      setError(`Upload failed: ${err.message}`);
+      setError(t("Upload failed: {message}", { message: err.message }));
       return [];
     }
   };
@@ -605,60 +622,61 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (err) {
-      setError(`Export failed: ${err.message}`);
+      setError(t("Export failed: {message}", { message: err.message }));
     } finally {
       setExportBusy(false);
     }
   };
 
   if (!site) {
-    return <div className="agent-checking">{error || "Loading site…"}</div>;
+    return <div className="agent-checking">{error || t("Loading site…")}</div>;
   }
 
   const h = historyRef.current;
-  const editorCtx = { assetSrc: (u) => u, editor: true };
+  const editorCtx = { assetSrc: (u) => u, editor: true, t };
 
   return (
     <div className="site-editor">
       <header className="site-topbar">
         <button className="back-link" onClick={exit}>
-          ← Sites
+          {t("← Sites")}
         </button>
         <span className="app-name site-topbar-name">{projectName}</span>
         <div className="site-topbar-group">
-          <button onClick={undo} disabled={!h.past.length} title="Undo (Ctrl+Z)">
-            ↶ Undo
+          <button onClick={undo} disabled={!h.past.length} title={t("Undo (Ctrl+Z)")}>
+            {t("↶ Undo")}
           </button>
-          <button onClick={redo} disabled={!h.future.length} title="Redo (Ctrl+Shift+Z)">
-            ↷ Redo
+          <button onClick={redo} disabled={!h.future.length} title={t("Redo (Ctrl+Shift+Z)")}>
+            {t("↷ Redo")}
           </button>
         </div>
         <div className="site-topbar-group site-device-toggle">
           <button className={device === "desktop" ? "active" : ""} onClick={() => setDevice("desktop")}>
-            🖥 Desktop
+            {t("🖥 Desktop")}
           </button>
           <button className={device === "phone" ? "active" : ""} onClick={() => setDevice("phone")}>
-            📱 Phone
+            {t("📱 Phone")}
           </button>
         </div>
         <span className={`site-save-state ${saveState}`}>
-          {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}
+          {saveState === "saving" ? t("Saving…") : saveState === "error" ? t("Not saved") : t("Saved")}
         </span>
         <div className="site-topbar-group site-topbar-right">
           <button onClick={() => siteApi.openProjectFolder(projectId).catch((err) => setError(err.message))}>
-            Open folder
+            {t("Open folder")}
           </button>
-          <button onClick={() => setShowPreview(true)}>Preview</button>
+          <button onClick={() => setShowPreview(true)}>{t("Preview")}</button>
           <button className="primary" onClick={exportHtml} disabled={exportBusy}>
-            {exportBusy ? "Exporting…" : "Export HTML"}
+            {exportBusy ? t("Exporting…") : t("Export HTML")}
           </button>
-          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+          <LangToggle />
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} titles={{ toLight: t("Switch to light mode"), toDark: t("Switch to dark mode") }} />
         </div>
       </header>
 
       <aside className="site-palette">
-        <h4>Rows</h4>
-        <p className="site-hint">Drag onto the page, or click to add.</p>
+        <h4>{t("Rows")}</h4>
+        <p className="site-hint">{t("Drag onto the page, or click to add.")}</p>
         <div className="site-layout-grid">
           {ROW_LAYOUTS.map((layout) => (
             <button
@@ -668,7 +686,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
               onDragStart={(e) => startDrag(e, { kind: "new-row", layout })}
               onDragEnd={endDrag}
               onClick={() => addRowByClick(layout)}
-              title={`${layout.split("-").length}-column row (${layout.replace(/-/g, " : ")})`}
+              title={t("{n}-column row ({ratio})", { n: layout.split("-").length, ratio: layout.replace(/-/g, " : ") })}
             >
               {layout.split("-").map((n, i) => (
                 <span key={i} style={{ flex: Number(n) }} />
@@ -676,26 +694,26 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
             </button>
           ))}
         </div>
-        <h4>Elements</h4>
-        <p className="site-hint">Drag into a column. Drop image files from your computer straight onto the page too.</p>
+        <h4>{t("Elements")}</h4>
+        <p className="site-hint">{t("Drag into a column. Drop image files from your computer straight onto the page too.")}</p>
         <div className="site-element-grid">
-          {ELEMENT_TYPES.map((t) => (
+          {ELEMENT_TYPES.map((et) => (
             <button
-              key={t.type}
+              key={et.type}
               className="site-element-tile"
               draggable
-              onDragStart={(e) => startDrag(e, { kind: "new-element", type: t.type })}
+              onDragStart={(e) => startDrag(e, { kind: "new-element", type: et.type })}
               onDragEnd={endDrag}
-              onClick={() => addElementByClick(t.type)}
+              onClick={() => addElementByClick(et.type)}
             >
-              <span className="site-element-icon">{t.icon}</span>
-              {t.label}
+              <span className="site-element-icon">{et.icon}</span>
+              {t(et.label)}
             </button>
           ))}
         </div>
         <p className="site-hint site-shortcuts">
-          <strong>Del</strong> delete · <strong>Ctrl+D</strong> duplicate · <strong>Ctrl+Z</strong> undo ·{" "}
-          <strong>Esc</strong> page settings
+          <strong>Del</strong> {t("delete")} · <strong>Ctrl+D</strong> {t("duplicate")} · <strong>Ctrl+Z</strong>{" "}
+          {t("undo")} · <strong>Esc</strong> {t("page settings")}
         </p>
       </aside>
 
@@ -717,7 +735,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
             onDrop={onPageDrop}
           >
             {site.rows.length === 0 && (
-              <div className="sbe sbe-page-placeholder">Drag a row layout or an element here to start.</div>
+              <div className="sbe sbe-page-placeholder">{t("Drag a row layout or an element here to start.")}</div>
             )}
             {site.rows.map((row, rowIndex) => {
               const rowSelected = selection?.kind === "row" && selection.id === row.id;
@@ -801,7 +819,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
                               onDelete={deleteSelection}
                             />
                           ))}
-                          {col.elements.length === 0 && <div className="sbe sbe-col-empty">Drop elements here</div>}
+                          {col.elements.length === 0 && <div className="sbe sbe-col-empty">{t("Drop elements here")}</div>}
                         </div>
                       );
                     })}
@@ -815,7 +833,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
 
       <aside className="site-inspector">
         {error && (
-          <p className="site-error" onClick={() => setError("")} title="Click to dismiss">
+          <p className="site-error" onClick={() => setError("")} title={t("Click to dismiss")}>
             {error}
           </p>
         )}
@@ -828,29 +846,30 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
 }
 
 function RowToolbar({ row, index, count, onDragStart, onDragEnd, onLayout, onMove, onDuplicate, onDelete }) {
+  const t = useT();
   const stop = (e) => e.stopPropagation();
   return (
     <div className="sbe sbe-row-tools" onClick={stop}>
-      <span className="sbe-handle" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} title="Drag to move row">
-        ⠿ Row
+      <span className="sbe-handle" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} title={t("Drag to move row")}>
+        {t("⠿ Row")}
       </span>
-      <select value={row.layout} onChange={(e) => onLayout(e.target.value)} title="Column layout">
+      <select value={row.layout} onChange={(e) => onLayout(e.target.value)} title={t("Column layout")}>
         {ROW_LAYOUTS.map((l) => (
           <option key={l} value={l}>
-            {l.split("-").length === 1 ? "1 column" : `${l.split("-").length} cols · ${l.replace(/-/g, ":")}`}
+            {l.split("-").length === 1 ? t("1 column") : t("{n} cols · {ratio}", { n: l.split("-").length, ratio: l.replace(/-/g, ":") })}
           </option>
         ))}
       </select>
-      <button onClick={() => onMove(-1)} disabled={index === 0} title="Move up">
+      <button onClick={() => onMove(-1)} disabled={index === 0} title={t("Move up")}>
         ↑
       </button>
-      <button onClick={() => onMove(1)} disabled={index === count - 1} title="Move down">
+      <button onClick={() => onMove(1)} disabled={index === count - 1} title={t("Move down")}>
         ↓
       </button>
-      <button onClick={onDuplicate} title="Duplicate row">
+      <button onClick={onDuplicate} title={t("Duplicate row")}>
         ⧉
       </button>
-      <button onClick={onDelete} title="Delete row" className="sbe-danger">
+      <button onClick={onDelete} title={t("Delete row")} className="sbe-danger">
         ✕
       </button>
     </div>
@@ -858,6 +877,7 @@ function RowToolbar({ row, index, count, onDragStart, onDragEnd, onLayout, onMov
 }
 
 function ElementBlock({ el, html, selected, dropClass, onSelect, onDragStart, onDragEnd, onDragOver, onDrop, onDuplicate, onDelete }) {
+  const t = useT();
   return (
     <div
       data-el-id={el.id}
@@ -876,11 +896,11 @@ function ElementBlock({ el, html, selected, dropClass, onSelect, onDragStart, on
       <div className="sbe-el-body" dangerouslySetInnerHTML={{ __html: html }} />
       {selected && (
         <div className="sbe sbe-el-tools" onClick={(e) => e.stopPropagation()}>
-          <span>{typeLabel(el.type)}</span>
-          <button onClick={onDuplicate} title="Duplicate (Ctrl+D)">
+          <span>{t(typeLabel(el.type))}</span>
+          <button onClick={onDuplicate} title={t("Duplicate (Ctrl+D)")}>
             ⧉
           </button>
-          <button onClick={onDelete} title="Delete (Del)" className="sbe-danger">
+          <button onClick={onDelete} title={t("Delete (Del)")} className="sbe-danger">
             ✕
           </button>
         </div>
@@ -890,6 +910,7 @@ function ElementBlock({ el, html, selected, dropClass, onSelect, onDragStart, on
 }
 
 function PreviewModal({ site, onClose }) {
+  const t = useT();
   const [width, setWidth] = useState("desktop");
   const html = renderSiteHtml(site);
   return (
@@ -898,17 +919,17 @@ function PreviewModal({ site, onClose }) {
         <div className="site-preview-bar">
           <div className="site-topbar-group site-device-toggle">
             <button className={width === "desktop" ? "active" : ""} onClick={() => setWidth("desktop")}>
-              🖥 Desktop
+              {t("🖥 Desktop")}
             </button>
             <button className={width === "phone" ? "active" : ""} onClick={() => setWidth("phone")}>
-              📱 Phone
+              {t("📱 Phone")}
             </button>
           </div>
-          <span className="site-hint">Exactly what Export produces (links and book buttons are live here).</span>
-          <button onClick={onClose}>Close</button>
+          <span className="site-hint">{t("Exactly what Export produces (links and book buttons are live here).")}</span>
+          <button onClick={onClose}>{t("Close")}</button>
         </div>
         <iframe
-          title="Site preview"
+          title={t("Site preview")}
           className="site-preview-frame"
           style={width === "phone" ? { width: PHONE_WIDTH } : undefined}
           srcDoc={html}
@@ -933,23 +954,24 @@ function Inspector({ site, selection, commit, uploadFiles, onDeselect }) {
 }
 
 function PageInspector({ settings, commit }) {
+  const t = useT();
   const set = (key) => (value) => commit((s) => (s.settings[key] = value), `page:${key}`);
   return (
     <div className="site-inspector-body">
-      <h4>Page settings</h4>
-      <p className="site-hint">Click any row or element on the page to edit it.</p>
+      <h4>{t("Page settings")}</h4>
+      <p className="site-hint">{t("Click any row or element on the page to edit it.")}</p>
       <Field label="Page title (browser tab)">
         <input value={settings.title} onChange={(e) => set("title")(e.target.value)} />
       </Field>
       <Field label="Language code">
-        <input value={settings.lang} onChange={(e) => set("lang")(e.target.value)} placeholder="ko, en, ja…" />
+        <input value={settings.lang} onChange={(e) => set("lang")(e.target.value)} placeholder={t("ko, en, ja…")} />
       </Field>
       <NumberField label="Page width (px)" value={settings.maxWidth} min={320} max={1600} step={10} onChange={set("maxWidth")} />
       <Field label="Font">
         <select value={settings.font} onChange={(e) => set("font")(e.target.value)}>
           {SITE_FONTS.map((f) => (
             <option key={f.value} value={f.value}>
-              {f.label}
+              {t(f.label)}
             </option>
           ))}
         </select>
@@ -962,6 +984,7 @@ function PageInspector({ settings, commit }) {
 }
 
 function RowInspector({ row, commit, onDeselect }) {
+  const t = useT();
   const set = (key) => (value) =>
     commit((s) => {
       const r = s.rows.find((x) => x.id === row.id);
@@ -990,7 +1013,9 @@ function RowInspector({ row, commit, onDeselect }) {
         >
           {ROW_LAYOUTS.map((l) => (
             <option key={l} value={l}>
-              {l.split("-").length === 1 ? "1 column" : `${l.split("-").length} columns · ${l.replace(/-/g, " : ")}`}
+              {l.split("-").length === 1
+                ? t("1 column")
+                : t("{n} columns · {ratio}", { n: l.split("-").length, ratio: l.replace(/-/g, " : ") })}
             </option>
           ))}
         </select>
@@ -1152,6 +1177,7 @@ function ElementInspector({ el, commit, uploadFiles, onDeselect }) {
 }
 
 function GalleryInspector({ el, update, set, uploadFiles }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
   const setItem = (id, patch, key) =>
@@ -1200,7 +1226,7 @@ function GalleryInspector({ el, update, set, uploadFiles }) {
         }}
         onClick={() => fileRef.current?.click()}
       >
-        {busy ? "Uploading…" : "＋ Add covers — click or drop several images"}
+        {busy ? t("Uploading…") : t("＋ Add covers — click or drop several images")}
         <input
           ref={fileRef}
           type="file"
@@ -1220,15 +1246,15 @@ function GalleryInspector({ el, update, set, uploadFiles }) {
             <div className="site-gallery-item-top">
               <ImageThumb src={item.src} uploadFiles={uploadFiles} onChange={(src) => setItem(item.id, { src })} />
               <div className="site-gallery-item-fields">
-                <input placeholder="Title" value={item.title} onChange={(e) => setItem(item.id, { title: e.target.value }, "title")} />
+                <input placeholder={t("Title")} value={item.title} onChange={(e) => setItem(item.id, { title: e.target.value }, "title")} />
                 <div className="site-gallery-item-buttons">
-                  <button onClick={() => moveItem(i, -1)} disabled={i === 0} title="Move earlier">
+                  <button onClick={() => moveItem(i, -1)} disabled={i === 0} title={t("Move earlier")}>
                     ←
                   </button>
-                  <button onClick={() => moveItem(i, 1)} disabled={i === el.items.length - 1} title="Move later">
+                  <button onClick={() => moveItem(i, 1)} disabled={i === el.items.length - 1} title={t("Move later")}>
                     →
                   </button>
-                  <button className="sbe-danger" onClick={() => update({ items: el.items.filter((x) => x.id !== item.id) })} title="Remove">
+                  <button className="sbe-danger" onClick={() => update({ items: el.items.filter((x) => x.id !== item.id) })} title={t("Remove")}>
                     ✕
                   </button>
                 </div>
@@ -1257,6 +1283,7 @@ const DEFAULT_BORDER_WIDTH = 2;
 // inner padding and background. Elements made before this existed have no box* fields,
 // so missing ones read as BOX_DEFAULTS.
 function BoxFields({ el, set, update }) {
+  const t = useT();
   const b = { ...BOX_DEFAULTS, ...el };
   const setWithBorder = (key) => (value) =>
     update(
@@ -1265,7 +1292,7 @@ function BoxFields({ el, set, update }) {
     );
   return (
     <div className="site-box-fields">
-      <h4>Border &amp; box</h4>
+      <h4>{t("Border & box")}</h4>
       <div className="site-field-pair">
         <NumberField label="Border width (px)" value={b.boxBorderWidth} min={0} max={30} onChange={set("boxBorderWidth")} />
         <NumberField label="Corner radius" value={b.boxRadius} min={0} max={200} onChange={set("boxRadius")} />
@@ -1282,12 +1309,16 @@ function BoxFields({ el, set, update }) {
 
 // ---------- Inspector fields ----------
 
+// Captions passed to InspectorHeader and the field components below are English
+// strings that these components translate themselves (see siteI18n.jsx), so call
+// sites just write label="Corner radius" etc.
 function InspectorHeader({ title, onBack }) {
+  const t = useT();
   return (
     <div className="site-inspector-header">
-      <h4>{title}</h4>
-      <button className="back-link" onClick={onBack} title="Back to page settings (Esc)">
-        Page settings
+      <h4>{t(title)}</h4>
+      <button className="back-link" onClick={onBack} title={t("Back to page settings (Esc)")}>
+        {t("Page settings")}
       </button>
     </div>
   );
@@ -1296,35 +1327,49 @@ function InspectorHeader({ title, onBack }) {
 // `group`: a <div> instead of a <label>, for fields holding several controls (a label
 // would forward clicks on its caption to the first one — e.g. pop the color picker).
 function Field({ label, children, group = false }) {
+  const t = useT();
   const Tag = group ? "div" : "label";
   return (
     <Tag className="site-field">
-      <span>{label}</span>
+      <span>{t(label)}</span>
       {children}
     </Tag>
   );
 }
 
+// A slider for dragging plus a small number box for typing/arrow keys, both bound to
+// the same value. Typing past the slider's range is allowed (the slider just pins at
+// its end). Dragging commits on every step, which commit() coalesces into one undo step.
 function NumberField({ label, value, min, max, step = 1, onChange }) {
+  const t = useT();
+  const num = Number(value) || 0;
+  const emit = (raw) => {
+    const v = parseFloat(raw);
+    onChange(Number.isNaN(v) ? 0 : v);
+  };
   return (
-    <Field label={label}>
+    <div className="site-field site-number-field">
+      <span className="site-number-head">
+        <span>{t(label)}</span>
+        <input type="number" value={value} min={min} max={max} step={step} onChange={(e) => emit(e.target.value)} />
+      </span>
       <input
-        type="number"
-        value={value}
+        type="range"
+        className="site-slider"
+        value={Math.min(max, Math.max(min, num))}
         min={min}
         max={max}
         step={step}
-        onChange={(e) => {
-          const v = parseFloat(e.target.value);
-          onChange(Number.isNaN(v) ? 0 : v);
-        }}
+        onChange={(e) => emit(e.target.value)}
+        aria-label={t(label)}
       />
-    </Field>
+    </div>
   );
 }
 
 // allowEmpty: blank means "inherit" (e.g. a heading using the page's text color).
 function ColorField({ label, value, onChange, allowEmpty = false }) {
+  const t = useT();
   return (
     <Field label={label} group>
       <span className="site-color">
@@ -1332,11 +1377,11 @@ function ColorField({ label, value, onChange, allowEmpty = false }) {
         <input
           className="site-color-text"
           value={value}
-          placeholder={allowEmpty ? "default" : ""}
+          placeholder={allowEmpty ? t("default") : ""}
           onChange={(e) => onChange(e.target.value.trim())}
         />
         {allowEmpty && value && (
-          <button type="button" onClick={() => onChange("")} title="Use the default">
+          <button type="button" onClick={() => onChange("")} title={t("Use the default")}>
             ✕
           </button>
         )}
@@ -1346,20 +1391,22 @@ function ColorField({ label, value, onChange, allowEmpty = false }) {
 }
 
 function CheckField({ label, checked, onChange }) {
+  const t = useT();
   return (
     <label className="site-check">
       <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
-      {label}
+      {t(label)}
     </label>
   );
 }
 
 function Segmented({ value, options, onChange }) {
+  const t = useT();
   return (
     <span className="site-segmented">
       {options.map(([v, label]) => (
         <button type="button" key={v} className={value === v ? "active" : ""} onClick={() => onChange(v)}>
-          {label}
+          {t(label)}
         </button>
       ))}
     </span>
@@ -1367,35 +1414,37 @@ function Segmented({ value, options, onChange }) {
 }
 
 function ActionField({ action, onChange, compact = false }) {
+  const t = useT();
   const a = action || { type: "none", value: "" };
   const invalidBook = a.type === "book" && a.value.trim() && !BOOK_CODE_RE.test(a.value.trim());
   return (
     <div className={`site-action${compact ? " compact" : ""}`}>
-      {!compact && <span className="site-field-label">When tapped</span>}
+      {!compact && <span className="site-field-label">{t("When tapped")}</span>}
       <select value={a.type} onChange={(e) => onChange({ ...a, type: e.target.value })}>
-        <option value="none">Nothing</option>
-        <option value="url">Open a web link</option>
-        <option value="book">Open a PageBox book</option>
+        <option value="none">{t("Nothing")}</option>
+        <option value="url">{t("Open a web link")}</option>
+        <option value="book">{t("Open a PageBox book")}</option>
       </select>
       {a.type !== "none" && (
         <input
           value={a.value}
-          placeholder={a.type === "url" ? "https://…" : "Book code, e.g. CM1789619174392963"}
+          placeholder={a.type === "url" ? "https://…" : t("Book code, e.g. CM1789619174392963")}
           onChange={(e) => onChange({ ...a, value: e.target.value })}
         />
       )}
-      {invalidBook && <span className="site-error-inline">Book codes look like CM followed by digits.</span>}
+      {invalidBook && <span className="site-error-inline">{t("Book codes look like CM followed by digits.")}</span>}
     </div>
   );
 }
 
 function ImageField({ src, uploadFiles, onChange }) {
+  const t = useT();
   return (
     <Field label="Image" group>
       <ImageThumb large src={src} uploadFiles={uploadFiles} onChange={onChange} />
       {src && (
         <button type="button" className="back-link site-remove-image" onClick={() => onChange("")}>
-          Remove image
+          {t("Remove image")}
         </button>
       )}
     </Field>
@@ -1404,6 +1453,7 @@ function ImageField({ src, uploadFiles, onChange }) {
 
 // Click to pick a file, or drop one on it — replaces the image in place.
 function ImageThumb({ src, uploadFiles, onChange, large = false }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
   const accept = async (files) => {
@@ -1425,9 +1475,9 @@ function ImageThumb({ src, uploadFiles, onChange, large = false }) {
         e.preventDefault();
         accept(e.dataTransfer.files);
       }}
-      title="Click to choose an image, or drop one here"
+      title={t("Click to choose an image, or drop one here")}
     >
-      {busy ? "Uploading…" : src ? <img src={src} alt="" /> : large ? "Click or drop an image" : "＋"}
+      {busy ? t("Uploading…") : src ? <img src={src} alt="" /> : large ? t("Click or drop an image") : "＋"}
       <input
         ref={fileRef}
         type="file"

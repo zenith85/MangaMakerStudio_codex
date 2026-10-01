@@ -23,7 +23,8 @@ export function useTheme() {
   return [theme, toggleTheme];
 }
 
-export function ThemeToggle({ theme, onToggle }) {
+// `titles` lets a caller supply its own (e.g. translated) tooltips; defaults to English.
+export function ThemeToggle({ theme, onToggle, titles = { toLight: "Switch to light mode", toDark: "Switch to dark mode" } }) {
   const isLight = theme === "light";
   return (
     <button
@@ -31,7 +32,7 @@ export function ThemeToggle({ theme, onToggle }) {
       className={`theme-toggle${isLight ? " light" : ""}`}
       role="switch"
       aria-checked={isLight}
-      title={isLight ? "Switch to dark mode" : "Switch to light mode"}
+      title={isLight ? titles.toDark : titles.toLight}
       onClick={onToggle}
     >
       <span className="theme-toggle-track">

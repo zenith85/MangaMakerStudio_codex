@@ -107,6 +107,20 @@
 .site-topbar-right {
   margin-left: auto;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Buttons keep their natural width and never break mid-label (Korean labels are
+   longer) — when space runs out the groups wrap onto a second line instead. */
+.site-topbar button,
+.site-topbar .site-lang-toggle {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.site-topbar button.primary {
+  width: auto;
 }
 
 .site-topbar button:not(.back-link):not(.theme-toggle),
@@ -498,7 +512,7 @@
   color: var(--text-muted);
 }
 
-.site-field input:not([type="color"]):not([type="checkbox"]),
+.site-field input:not([type="color"]):not([type="checkbox"]):not([type="range"]),
 .site-field select,
 .site-field textarea,
 .site-action select,
@@ -522,6 +536,32 @@
 .site-code {
   font-family: ui-monospace, Menlo, Consolas, monospace !important;
   font-size: 12px !important;
+}
+
+/* NumberField: label + compact number box on one line, slider full width beneath. */
+.site-number-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.site-number-head span {
+  min-width: 0;
+}
+
+.site-field.site-number-field .site-number-head input[type="number"] {
+  width: 62px;
+  flex-shrink: 0;
+  padding: 3px 6px;
+  text-align: right;
+}
+
+.site-slider {
+  width: 100%;
+  margin: 2px 0 0;
+  accent-color: #4a5cff;
+  cursor: pointer;
 }
 
 .site-field-pair {
@@ -761,4 +801,35 @@
   margin: 0 auto;
   border: 0;
   background: #fff;
+}
+
+/* ---------- Interface language switch (siteI18n.jsx) ---------- */
+
+.site-landing-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.site-lang-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.site-lang-toggle button,
+.site-topbar .site-lang-toggle button:not(.back-link):not(.theme-toggle) {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.site-lang-toggle button.active,
+.site-topbar .site-lang-toggle button.active:not(.back-link):not(.theme-toggle) {
+  background: #4a5cff;
+  color: #fff;
 }

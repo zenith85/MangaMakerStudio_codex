@@ -243,6 +243,10 @@ function boxStyle(el) {
   return Object.values(style).some((v) => v !== "") ? style : null;
 }
 
+// Editor-only placeholder text goes through the builder's interface language when the
+// canvas passes ctx.t (see siteI18n.jsx); the export never shows placeholders.
+const tr = (ctx, text) => (ctx.t ? ctx.t(text) : text);
+
 // ctx.assetSrc maps a stored image URL to what should actually go in src="" (the URL
 // itself on the canvas, a data: URI in the export); ctx.editor marks canvas rendering.
 // Buttons and labels are inline-sized, so their frame shrinks to fit them (positioned by
@@ -283,7 +287,7 @@ function renderElementInner(el, ctx) {
         fontSize: px(el.size),
       })}>${multiline(el.text)}</span></div>`;
     case "image": {
-      if (!el.src) return ctx.editor ? `<div class="sb-placeholder">Image — choose a file on the right, or drop one here</div>` : "";
+      if (!el.src) return ctx.editor ? `<div class="sb-placeholder">${esc(tr(ctx, "Image — choose a file on the right, or drop one here"))}</div>` : "";
       const width = `${Number(el.width) || 100}%`;
       const radius = Number(el.radius) > 0 ? px(el.radius) : "";
       const a = actionAttrs(el.action, el.alt, ctx);
@@ -322,7 +326,7 @@ function renderElementInner(el, ctx) {
             })
             .join("")
         : ctx.editor
-        ? `<div class="sb-placeholder" style="grid-column:1/-1">Book shelf — add covers on the right</div>`
+        ? `<div class="sb-placeholder" style="grid-column:1/-1">${esc(tr(ctx, "Book shelf — add covers on the right"))}</div>`
         : "";
       return `<div class="sb-gallery"${styleAttr({
         gridTemplateColumns: `repeat(${Number(el.columns) || 3},minmax(0,1fr))`,
