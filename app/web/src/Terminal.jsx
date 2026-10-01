@@ -25,17 +25,39 @@ export default function Terminal({ projectId }) {
     // served from somewhere else entirely, but the terminal bridge only ever runs on
     // the browser's own machine (see api.js for the same reasoning on BASE).
     const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-    const ws = new WebSocket(`ws://localhost:8787/ws/terminal${query}`);
+    let ws = null;
+    let reconnectTimer = null;
+    let unmounted = false;
+    let everConnected = false;
 
-    ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-    });
+    // The backend restarting (which happens whenever its own code changes) always
+    // drops this socket — without reconnecting, the terminal just sits there silently
+    // frozen forever, making a Generate/edit request look like it's doing nothing even
+    // though it's actually running fine server-side. Announce the gap directly in the
+    // terminal output itself (right where you're already looking) rather than failing
+    // silently, and heal it automatically a moment later.
+    const connect = () => {
+      ws = new WebSocket(`ws://localhost:8787/ws/terminal${query}`);
 
-    ws.addEventListener("message", (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "data") term.write(msg.data);
-      else if (msg.type === "exit") term.write(`\r\n[process exited with code ${msg.exitCode}]\r\n`);
-    });
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        if (everConnected) term.write("\r\n[reconnected]\r\n");
+        everConnected = true;
+      });
+
+      ws.addEventListener("message", (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "data") term.write(msg.data);
+        else if (msg.type === "exit") term.write(`\r\n[process exited with code ${msg.exitCode}]\r\n`);
+      });
+
+      ws.addEventListener("close", () => {
+        if (unmounted) return;
+        if (everConnected) term.write("\r\n[disconnected — reconnecting…]\r\n");
+        reconnectTimer = setTimeout(connect, 1500);
+      });
+    };
+    connect();
 
     const dataListener = term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
@@ -54,6 +76,8 @@ export default function Terminal({ projectId }) {
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      unmounted = true;
+      clearTimeout(reconnectTimer);
       resizeObserver.disconnect();
       dataListener.dispose();
       ws.close();
