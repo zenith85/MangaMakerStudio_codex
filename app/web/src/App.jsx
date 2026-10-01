@@ -1527,6 +1527,15 @@ export default function App() {
   const allPanelsForMention = pages
     .map((p) => (p.id === currentPage?.id ? currentPage : p))
     .flatMap((p) => p.panels.map((panel) => ({ ...panel, pageTitle: p.title })));
+  // Same, plus floating panels — for the "copy an image from a panel" pickers only.
+  // Mentions stay grid-only above, since the server's continuity lookup only searches
+  // each page's grid panels.
+  const allPanelsForImagePicker = pages
+    .map((p) => (p.id === currentPage?.id ? currentPage : p))
+    .flatMap((p) => [
+      ...p.panels.map((panel) => ({ ...panel, pageTitle: p.title })),
+      ...(p.floatingPanels || []).map((panel, i) => ({ ...panel, pageTitle: p.title, floatingIndex: i })),
+    ]);
 
   // ---------- Local agent not reachable / not yet checked ----------
   if (agentStatus === "checking") return <div className="agent-checking">Checking for local agent…</div>;
@@ -1698,6 +1707,7 @@ export default function App() {
           objects={entities.objects}
           references={entities.references}
           allPanels={allPanelsForMention}
+          imagePickerPanels={allPanelsForImagePicker}
           previousPageId={currentPageIndex > 0 ? pages[currentPageIndex - 1].id : null}
           previousPanel={previousPanelFor(selectedPanel)}
           onClose={() => setSelectedPanelId(null)}
@@ -1724,6 +1734,7 @@ export default function App() {
           objects={entities.objects}
           references={entities.references}
           allPanels={allPanelsForMention}
+          imagePickerPanels={allPanelsForImagePicker}
           folderId={openFolderId}
           onClose={() => setEditingEntity(null)}
           onSaved={() => refreshEntities(currentProjectId)}
@@ -2263,7 +2274,7 @@ function EntityFolderCard({ folder, count, isDragOver, onOpen, onRename, onDelet
 // picture or click Generate to bridge everything to Codex. Redraw just re-runs
 // generate against the same entity, replacing its image.
 function EntityCreatorModal({
-  projectId, kind, entity: initialEntity, characters, places, objects, references, allPanels, folderId,
+  projectId, kind, entity: initialEntity, characters, places, objects, references, allPanels, imagePickerPanels, folderId,
   onClose, onSaved,
 }) {
   const singular = ENTITY_KINDS.find((k) => k.value === kind).singular;
@@ -2565,12 +2576,12 @@ function EntityCreatorModal({
       <ChooseImageModal
         title="Choose image from a panel"
         emptyHint="No panels have an image yet."
-        items={allPanels
+        items={imagePickerPanels
           .filter((p) => p.hasImage)
           .map((p) => ({
             key: p.id,
             imageUrl: p.imageUrl,
-            label: p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`,
+            label: panelPickerLabel(p),
             value: p,
           }))}
         onPick={chooseFromPanel}
@@ -3835,6 +3846,14 @@ function ChooseImageModal({ title, emptyHint, items, onPick, onClose }) {
 // "Request edit" tab and EditCompareModal's "after edit chat" follow-ups, since both just
 // need "draw on this image, hand me back the marker list" — the caller owns `markers` and
 // decides what to do with them (send alongside the edit request).
+// Label for a panel in the "copy image from a panel" pickers (see
+// allPanelsForImagePicker) — floating panels have no grid slot, so they're numbered
+// among their page's floating panels instead.
+function panelPickerLabel(p) {
+  const name = p.floating ? `Floating panel ${p.floatingIndex + 1}` : `Panel ${p.order + 1}`;
+  return p.pageTitle ? `${p.pageTitle} · ${name}` : name;
+}
+
 function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
   const [tool, setTool] = useState("rect"); // "rect" | "arrow" — which shape the next drag draws
   const [aspect, setAspect] = useState(null);
@@ -4451,6 +4470,7 @@ function PanelEditor({
   objects,
   references,
   allPanels,
+  imagePickerPanels,
   previousPageId,
   previousPanel,
   onClose,
@@ -5633,12 +5653,12 @@ function PanelEditor({
       <ChooseImageModal
         title="Copy image from another panel"
         emptyHint="No other panels have an image yet."
-        items={allPanels
+        items={imagePickerPanels
           .filter((p) => p.id !== panel.id && p.hasImage)
           .map((p) => ({
             key: p.id,
             imageUrl: p.imageUrl,
-            label: p.pageTitle ? `${p.pageTitle} · Panel ${p.order + 1}` : `Panel ${p.order + 1}`,
+            label: panelPickerLabel(p),
             value: p,
           }))}
         onPick={copyFromPanel}
