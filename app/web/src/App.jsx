@@ -3453,6 +3453,7 @@ function PanelThumb({
 
   const offset = panel.imageOffset || { x: 50, y: 50 };
   const rotate = panel.imageRotate || 0;
+  const flipH = !!panel.imageFlipH;
   const zoom = panel.imageScale || 1;
   const frameW = frameSize.w || 1;
   const frameH = frameSize.h || 1;
@@ -3745,7 +3746,7 @@ function PanelThumb({
                   width={renderedW}
                   height={renderedH}
                   clipPath={`url(#panel-shape-${panel.id})`}
-                  transform={`translate(${rotateOriginX} ${rotateOriginY}) rotate(${rotate}) scale(${rotateScale}) translate(${-rotateOriginX} ${-rotateOriginY})`}
+                  transform={`translate(${rotateOriginX} ${rotateOriginY}) scale(${flipH ? -1 : 1} 1) rotate(${rotate}) scale(${rotateScale}) translate(${-rotateOriginX} ${-rotateOriginY})`}
                   style={{ filter: `brightness(${panel.imageBrightness ?? 100}%)` }}
                 />
               </svg>
@@ -3764,7 +3765,7 @@ function PanelThumb({
                 top: imgTop,
                 width: renderedW,
                 height: renderedH,
-                transform: `rotate(${rotate}deg) scale(${rotateScale})`,
+                transform: `scaleX(${flipH ? -1 : 1}) rotate(${rotate}deg) scale(${rotateScale})`,
                 transformOrigin: `${rotateOriginX}px ${rotateOriginY}px`,
                 filter: `brightness(${panel.imageBrightness ?? 100}%)`,
               }}
@@ -4692,6 +4693,11 @@ function PanelEditor({
     await onUpdated();
   };
 
+  const flipImageHorizontal = async () => {
+    await api.updatePanel(projectId, page.id, panel.id, { imageFlipH: !panel.imageFlipH });
+    await onUpdated();
+  };
+
   const commitZoom = async (value) => {
     await api.updatePanel(projectId, page.id, panel.id, { imageScale: value });
     setZoomDraft(null);
@@ -5079,6 +5085,12 @@ function PanelEditor({
             <div className="panel-image-transform">
               <button className="panel-image-action-btn" onClick={rotateImage}>
                 ⟳ Rotate 90°
+              </button>
+              <button
+                className={`panel-image-action-btn${panel.imageFlipH ? " active" : ""}`}
+                onClick={flipImageHorizontal}
+              >
+                ⇋ Flip
               </button>
               <label className="panel-zoom-control">
                 <span className="panel-zoom-label">Rotation</span>

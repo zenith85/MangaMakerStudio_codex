@@ -2408,6 +2408,12 @@ button.primary:disabled {
   cursor: default;
 }
 
+.panel-image-action-btn.active {
+  background: #4a5cff;
+  border-color: #4a5cff;
+  color: white;
+}
+
 .image-clear-button {
   width: 100%;
   margin-top: 10px;
