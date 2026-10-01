@@ -107,17 +107,20 @@ function isValidMarker(m) {
   if (m.type === "arrow") {
     return ["x1", "y1", "x2", "y2"].every((k) => Number.isFinite(m[k])) && Math.hypot(m.x2 - m.x1, m.y2 - m.y1) > 0.5;
   }
+  if (m.type === "doodle") {
+    return Array.isArray(m.points) && m.points.length >= 2 && m.points.every((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y));
+  }
   return (
     ["x", "y", "width", "height"].every((k) => Number.isFinite(m[k])) && m.width > 0.5 && m.height > 0.5
   );
 }
 
-// Bakes red annotations (boxes and/or arrows) onto a COPY of the panel image, in
-// image-pixel coordinates derived from each marker's 0-100 percentages (as drawn by the
-// user over the displayed image on the frontend, which shows the same unrotated/unscaled
-// source file). This copy is sent to Codex as an extra reference image purely to point
-// at the edit region/direction — see buildEditPrompt's hasMarker note, which tells Codex
-// not to reproduce the markup.
+// Bakes red annotations (boxes, arrows, and/or freehand doodles) onto a COPY of the
+// panel image, in image-pixel coordinates derived from each marker's 0-100 percentages
+// (as drawn by the user over the displayed image on the frontend, which shows the same
+// unrotated/unscaled source file). This copy is sent to Codex as an extra reference
+// image purely to point at the edit region/direction — see buildEditPrompt's hasMarker
+// note, which tells Codex not to reproduce the markup.
 async function drawMarkers(imageBuffer, markers) {
   const { width: imgW, height: imgH } = await sharp(imageBuffer).metadata();
   const strokeWidth = Math.max(4, Math.round(Math.min(imgW, imgH) * 0.008));
@@ -129,6 +132,10 @@ async function drawMarkers(imageBuffer, markers) {
         const x2 = (m.x2 / 100) * imgW;
         const y2 = (m.y2 / 100) * imgH;
         return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="red" stroke-width="${strokeWidth}" marker-end="url(#edit-arrowhead)" />`;
+      }
+      if (m.type === "doodle") {
+        const points = m.points.map((p) => `${(p.x / 100) * imgW},${(p.y / 100) * imgH}`).join(" ");
+        return `<polyline points="${points}" fill="none" stroke="red" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
       }
       const x = (m.x / 100) * imgW;
       const y = (m.y / 100) * imgH;

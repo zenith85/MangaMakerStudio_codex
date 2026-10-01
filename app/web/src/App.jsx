@@ -3856,7 +3856,7 @@ function panelPickerLabel(p) {
 }
 
 function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
-  const [tool, setTool] = useState("rect"); // "rect" | "arrow" — which shape the next drag draws
+  const [tool, setTool] = useState("rect"); // "rect" | "arrow" | "doodle" — which shape the next drag draws
   const [aspect, setAspect] = useState(null);
   const [drawingMarker, setDrawingMarker] = useState(null); // in-progress shape, not yet finalized
   const boxRef = useRef(null);
@@ -3878,10 +3878,12 @@ function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
     if (e.button !== 0) return;
     e.preventDefault();
     const start = percentFromEvent(e);
-    dragRef.current = { tool, start };
+    dragRef.current = { tool, start, points: tool === "doodle" ? [start] : undefined };
     setDrawingMarker(
       tool === "arrow"
         ? { type: "arrow", x1: start.x, y1: start.y, x2: start.x, y2: start.y }
+        : tool === "doodle"
+        ? { type: "doodle", points: [start] }
         : { type: "rect", x: start.x, y: start.y, width: 0, height: 0 }
     );
     window.addEventListener("pointermove", onPointerMove);
@@ -3892,16 +3894,22 @@ function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
     const d = dragRef.current;
     if (!d) return;
     const cur = percentFromEvent(e);
-    d.last =
-      d.tool === "arrow"
-        ? { type: "arrow", x1: d.start.x, y1: d.start.y, x2: cur.x, y2: cur.y }
-        : {
-            type: "rect",
-            x: Math.min(d.start.x, cur.x),
-            y: Math.min(d.start.y, cur.y),
-            width: Math.abs(cur.x - d.start.x),
-            height: Math.abs(cur.y - d.start.y),
-          };
+    if (d.tool === "arrow") {
+      d.last = { type: "arrow", x1: d.start.x, y1: d.start.y, x2: cur.x, y2: cur.y };
+    } else if (d.tool === "doodle") {
+      // Every move event appends a point rather than overwriting one — a freehand
+      // stroke is the whole path, not a start/end pair like the other two tools.
+      d.points.push(cur);
+      d.last = { type: "doodle", points: d.points };
+    } else {
+      d.last = {
+        type: "rect",
+        x: Math.min(d.start.x, cur.x),
+        y: Math.min(d.start.y, cur.y),
+        width: Math.abs(cur.x - d.start.x),
+        height: Math.abs(cur.y - d.start.y),
+      };
+    }
     setDrawingMarker(d.last);
   };
 
@@ -3915,7 +3923,12 @@ function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
     if (!m) return;
     // A stray click (no real drag) leaves a near-zero-size shape — drop it rather than
     // adding a meaningless sliver of a marker.
-    const tooSmall = m.type === "arrow" ? Math.hypot(m.x2 - m.x1, m.y2 - m.y1) < 1 : m.width < 1 || m.height < 1;
+    const tooSmall =
+      m.type === "arrow"
+        ? Math.hypot(m.x2 - m.x1, m.y2 - m.y1) < 1
+        : m.type === "doodle"
+        ? m.points.length < 2
+        : m.width < 1 || m.height < 1;
     if (!tooSmall) onChangeMarkers([...markers, { id: crypto.randomUUID(), ...m }]);
   };
 
@@ -3936,6 +3949,13 @@ function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
           onClick={() => setTool("arrow")}
         >
           Arrow
+        </button>
+        <button
+          type="button"
+          className={`edit-marker-tool-btn${tool === "doodle" ? " active" : ""}`}
+          onClick={() => setTool("doodle")}
+        >
+          Doodle
         </button>
       </div>
       <div
@@ -3968,6 +3988,17 @@ function MarkerDrawer({ imageUrl, markers, onChangeMarkers, label }) {
                 stroke="#ff3b30"
                 strokeWidth="1"
                 markerEnd={`url(#edit-marker-arrowhead-${m.id || "drawing"})`}
+              />
+            </svg>
+          ) : m.type === "doodle" ? (
+            <svg key={m.id || "drawing"} className="edit-marker-arrow-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <polyline
+                points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                fill="none"
+                stroke="#ff3b30"
+                strokeWidth="1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             </svg>
           ) : (
@@ -4513,7 +4544,7 @@ function PanelEditor({
   // sent alongside the edit request, but never part of the edited result (see backend's
   // drawMarkers/buildEditPrompt). A box marks a location; an arrow shows a direction of
   // motion — e.g. "turn the head this way" is hard to say in words but easy to draw.
-  const [editMarkers, setEditMarkers] = useState([]); // [{ id, type: "rect", x, y, width, height } | { id, type: "arrow", x1, y1, x2, y2 }]
+  const [editMarkers, setEditMarkers] = useState([]); // [{ id, type: "rect", x, y, width, height } | { id, type: "arrow", x1, y1, x2, y2 } | { id, type: "doodle", points: [{x,y}, ...] }]
   // Same idea, but for the "after edit chat" follow-ups — drawn over whichever candidate
   // image the next chat message would refine (see sendEditChatMessage), so a refinement
   // can point at a spot/direction too, not just describe it in words.
