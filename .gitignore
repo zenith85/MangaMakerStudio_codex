@@ -13,6 +13,9 @@ app/server/projects/
 # Same, for HTML Shorts Maker's book projects (see bookStore.js).
 app/server/book-projects/
 
+# Same, for Site Builder's site projects (see siteStore.js).
+app/server/site-projects/
+
 # Legacy/generated panel renders (pre-dates the projects/ folder structure)
 app/server/uploads/
 

@@ -2,11 +2,12 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import MangaStudioApp from "./App.jsx";
 import BookApp from "./BookApp.jsx";
+import SiteApp from "./SiteApp.jsx";
 import StudioPicker from "./StudioPicker.jsx";
 import "./index.css";
 import "./main-shell.css";
 
-// Top-level entry point: which studio ("manga" or "html") is active, if any — persisted
+// Top-level entry point: which studio ("manga", "html" or "site") is active, if any — persisted
 // so a returning visitor lands straight back in the same studio instead of re-picking
 // every time. App.jsx (Manga Studio) is imported and rendered completely unchanged —
 // only this file decides which studio to show; the floating "Studios" button below is
@@ -35,6 +36,8 @@ function Shell() {
         <MangaStudioApp />
       ) : studio === "html" ? (
         <BookApp onBackToStudios={backToStudios} />
+      ) : studio === "site" ? (
+        <SiteApp onBackToStudios={backToStudios} />
       ) : (
         <StudioPicker onPick={pickStudio} />
       )}

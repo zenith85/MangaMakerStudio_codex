@@ -1,0 +1,764 @@
+/* Styles for SiteApp.jsx (the builder UI) only. The page being built is styled by
+   siteRender.js's siteCss instead — injected into the canvas, scoped under
+   .sb-canvas-root. Editor chrome drawn INSIDE the page (selection outlines, drop
+   markers, row/element toolbars) is prefixed .sbe-, and its rules here are written as
+   `.sb-canvas-root .sb-page .sbe-…` so they outrank siteCss's in-canvas reset. Reuses
+   index.css's global layout classes and --bg- and --text- color tokens like the other studios. */
+
+/* ---------- Landing ---------- */
+
+.site-landing-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.site-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 520px;
+}
+
+.site-new-form input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.site-template-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.site-template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  text-align: left;
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  color: var(--text-primary);
+}
+
+.site-template-card span {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.site-template-card.active {
+  border-color: #4a5cff;
+  box-shadow: 0 0 0 1px #4a5cff;
+}
+
+.site-error {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 74, 92, 0.12);
+  color: #ff8a8a;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ---------- Editor shell ---------- */
+
+.site-editor {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 300px;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+}
+
+.site-topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+
+.site-topbar-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-topbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.site-topbar-right {
+  margin-left: auto;
+  gap: 8px;
+}
+
+.site-topbar button:not(.back-link):not(.theme-toggle),
+.site-preview-bar button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.site-topbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.site-topbar button.primary {
+  background: #4a5cff;
+  border-color: #4a5cff;
+  color: #fff;
+  font-weight: 600;
+}
+
+.site-device-toggle button.active {
+  background: #4a5cff;
+  border-color: #4a5cff;
+  color: #fff;
+}
+
+.site-save-state {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.site-save-state.error {
+  color: #ff8a8a;
+}
+
+/* ---------- Palette (left) ---------- */
+
+.site-palette,
+.site-inspector {
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg-surface);
+}
+
+.site-palette {
+  border-right: 1px solid var(--border-soft);
+  padding-bottom: 64px; /* clear of main.jsx's floating "Studios" button */
+}
+
+.site-inspector {
+  border-left: 1px solid var(--border-soft);
+}
+
+.site-palette h4,
+.site-inspector h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.site-hint {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+
+.site-shortcuts {
+  margin-top: 16px;
+}
+
+.site-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.site-layout-tile {
+  display: flex;
+  gap: 3px;
+  height: 34px;
+  padding: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: grab;
+}
+
+.site-layout-tile span {
+  border-radius: 2px;
+  background: #4a5cff;
+  opacity: 0.7;
+}
+
+.site-layout-tile:hover,
+.site-element-tile:hover {
+  border-color: #4a5cff;
+}
+
+.site-element-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.site-element-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  cursor: grab;
+}
+
+.site-element-icon {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+/* ---------- Canvas (center) ---------- */
+
+.site-canvas-scroll {
+  overflow: auto;
+  min-width: 0;
+}
+
+.site-canvas-scroll .sb-canvas-root {
+  min-height: 100%;
+  padding: 28px 24px 80px;
+}
+
+.sb-canvas-root .sbe-page {
+  min-height: 240px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
+  transition: max-width 0.2s;
+}
+
+.sb-canvas-root .sb-page.sbe-page-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: 2px dashed rgba(74, 92, 255, 0.5);
+  outline-offset: -12px;
+}
+
+.sb-canvas-root .sb-page.sbe-page-drop {
+  outline-color: #4a5cff;
+  background-color: rgba(74, 92, 255, 0.06);
+}
+
+.sbe-page-placeholder {
+  padding: 40px;
+  color: #7a8290;
+  font: 600 14px/1.5 system-ui, sans-serif;
+  text-align: center;
+}
+
+.sb-canvas-root .sb-page .sbe-row {
+  position: relative;
+}
+
+.sb-canvas-root .sb-page .sbe-row:hover {
+  box-shadow: inset 0 0 0 1px rgba(74, 92, 255, 0.45);
+}
+
+.sb-canvas-root .sb-page .sbe-row.is-selected {
+  box-shadow: inset 0 0 0 2px #4a5cff;
+}
+
+.sb-canvas-root .sb-page .sbe-col {
+  position: relative;
+  min-height: 40px;
+}
+
+.sbe-col-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  border: 1.5px dashed rgba(122, 130, 144, 0.55);
+  border-radius: 6px;
+  color: #7a8290;
+  font: 500 12px system-ui, sans-serif;
+}
+
+.sb-canvas-root .sb-page .sbe-col.sbe-col-drop .sbe-col-empty {
+  border-color: #4a5cff;
+  background: rgba(74, 92, 255, 0.08);
+  color: #4a5cff;
+}
+
+/* No text selection or native image dragging inside an element — otherwise pressing
+   on its text and moving starts a text selection instead of dragging the element. */
+.sb-canvas-root .sb-page .sbe-el {
+  position: relative;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+/* On every descendant too: user-select isn't inherited, and siteCss's in-canvas reset
+   puts it back to auto on the element's own tags. */
+.sb-canvas-root .sb-page .sbe-el,
+.sb-canvas-root .sb-page .sbe-el * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sb-canvas-root .sb-page .sbe-el img {
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.sb-canvas-root .sb-page .sbe-el:hover {
+  outline: 1px dashed rgba(74, 92, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.sb-canvas-root .sb-page .sbe-el.is-selected {
+  outline: 2px solid #4a5cff;
+  outline-offset: 2px;
+}
+
+.sb-canvas-root .sb-page .sbe-el.sbe-drop-replace {
+  outline: 2px dashed #4a5cff;
+  outline-offset: 2px;
+}
+
+/* Insertion markers: a bar just above/below the element (or row) the drop lands
+   next to — drawn as a pseudo-element so it never shifts the layout it's marking. */
+.sb-canvas-root .sb-page .sbe-drop-before::before,
+.sb-canvas-root .sb-page .sbe-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: #4a5cff;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.sb-canvas-root .sb-page .sbe-el.sbe-drop-before::before {
+  top: -6px;
+}
+
+.sb-canvas-root .sb-page .sbe-el.sbe-drop-after::after {
+  bottom: -6px;
+}
+
+.sb-canvas-root .sb-page .sbe-row.sbe-drop-before::before {
+  top: 0;
+  height: 4px;
+}
+
+.sb-canvas-root .sb-page .sbe-row.sbe-drop-after::after {
+  bottom: 0;
+  height: 4px;
+}
+
+/* Placeholders for an empty image / book shelf — rendered by siteRender.js only in the
+   editor, so they never reach the export. */
+.sb-canvas-root .sb-page .sb-placeholder {
+  padding: 26px 12px;
+  border: 1.5px dashed rgba(122, 130, 144, 0.6);
+  border-radius: 6px;
+  background: rgba(122, 130, 144, 0.08);
+  color: #7a8290;
+  font: 500 12px/1.5 system-ui, sans-serif;
+  text-align: center;
+  width: 100%;
+}
+
+.sbe-row-tools,
+.sbe-el-tools {
+  position: absolute;
+  z-index: 10;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #4a5cff;
+  color: #fff;
+  font: 600 11px system-ui, sans-serif;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+}
+
+.sbe-row-tools {
+  top: 6px;
+  left: 6px;
+}
+
+.sb-canvas-root .sb-page .sbe-row:hover > .sbe-row-tools,
+.sb-canvas-root .sb-page .sbe-row.is-selected > .sbe-row-tools {
+  display: flex;
+}
+
+/* Inside the element's top-right corner rather than above it — the page clips its
+   overflow, so a toolbar sticking out above the first element would be cut off. */
+.sbe-el-tools {
+  display: flex;
+  top: 4px;
+  right: 4px;
+}
+
+.sbe-el-tools span {
+  padding: 0 6px;
+}
+
+.sbe-row-tools button,
+.sbe-el-tools button,
+.sbe-row-tools select {
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+}
+
+.sbe-row-tools select option {
+  color: #111;
+}
+
+.sbe-row-tools button:hover:not(:disabled),
+.sbe-el-tools button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.sbe-row-tools button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sbe-row-tools .sbe-danger:hover,
+.sbe-el-tools .sbe-danger:hover {
+  background: #ff4a5c;
+}
+
+.sbe-handle {
+  padding: 3px 7px;
+  cursor: grab;
+}
+
+/* ---------- Inspector (right) ---------- */
+
+.site-inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.site-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.site-inspector-header h4 {
+  margin: 0;
+}
+
+.site-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.site-field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.site-field input:not([type="color"]):not([type="checkbox"]),
+.site-field select,
+.site-field textarea,
+.site-action select,
+.site-action input,
+.site-gallery-item input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.site-field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.site-code {
+  font-family: ui-monospace, Menlo, Consolas, monospace !important;
+  font-size: 12px !important;
+}
+
+.site-field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.site-color {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.site-color input[type="color"] {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  flex-shrink: 0;
+}
+
+.site-color button {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.site-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.site-segmented {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.site-segmented button {
+  flex: 1;
+  padding: 6px 4px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.site-segmented button:last-child {
+  border-right: 0;
+}
+
+.site-segmented button.active {
+  background: #4a5cff;
+  color: #fff;
+}
+
+.site-action {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.site-action.compact {
+  margin-top: 6px;
+}
+
+.site-error-inline {
+  font-size: 11.5px;
+  color: #ff8a8a;
+}
+
+.site-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 76px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1.5px dashed var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.site-thumb.large {
+  width: 100%;
+  height: auto;
+  min-height: 90px;
+  padding: 0;
+}
+
+.site-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.site-thumb.large img {
+  height: auto;
+  max-height: 220px;
+  object-fit: contain;
+}
+
+.site-thumb:hover {
+  border-color: #4a5cff;
+}
+
+.site-remove-image {
+  align-self: flex-start;
+  color: #ff8a8a;
+}
+
+.site-dropzone {
+  padding: 16px 10px;
+  border: 1.5px dashed var(--border);
+  border-radius: 8px;
+  color: #4a5cff;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.site-dropzone:hover {
+  border-color: #4a5cff;
+}
+
+.site-gallery-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.site-gallery-item {
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-surface-alt);
+}
+
+.site-gallery-item-top {
+  display: flex;
+  gap: 8px;
+}
+
+.site-gallery-item-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.site-gallery-item-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.site-gallery-item-buttons button {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+}
+
+.site-gallery-item-buttons button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.site-gallery-item-buttons .sbe-danger {
+  margin-left: auto;
+  color: #ff8a8a;
+}
+
+.site-box-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---------- Preview modal ---------- */
+
+.site-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.site-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--bg-surface);
+}
+
+.site-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.site-preview-bar .site-hint {
+  margin: 0;
+  flex: 1;
+}
+
+.site-preview-frame {
+  flex: 1;
+  width: 100%;
+  margin: 0 auto;
+  border: 0;
+  background: #fff;
+}

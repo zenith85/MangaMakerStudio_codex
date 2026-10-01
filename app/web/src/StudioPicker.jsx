@@ -27,6 +27,13 @@ export default function StudioPicker({ onPick }) {
             Curate an illustrated, condensed "10-minute read" of a book as one self-contained HTML file.
           </span>
         </button>
+        <button className="studio-card" onClick={() => onPick("site")}>
+          <span className="studio-card-icon">🧱</span>
+          <span className="studio-card-name">Site Builder</span>
+          <span className="studio-card-desc">
+            Drag elements into rows to design a web page, then export it as one HTML file.
+          </span>
+        </button>
       </div>
     </div>
   );

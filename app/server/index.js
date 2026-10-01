@@ -67,6 +67,20 @@ import { generateBookContentViaCodex } from "./bookCodex.js";
 import { buildBookContentPrompt, buildBookCoverImagePrompt, buildBookChapterImagePrompt } from "./bookPrompt.js";
 import { renderBookHtml } from "./bookTemplate.js";
 import { parseBookHtml } from "./bookImport.js";
+// Site Builder — a third separate studio, with its own storage (siteStore.js, a sibling
+// site-projects/ tree). No Codex involvement: the page is built by hand in the browser
+// and rendered to HTML there too (see the frontend's siteRender.js), so the server only
+// stores the site's JSON and its uploaded images.
+import {
+  listSiteProjects,
+  getSiteProject,
+  createSiteProject,
+  deleteSiteProject,
+  getSite,
+  saveSite,
+  saveSiteAsset,
+  SITE_PROJECTS_DIR,
+} from "./siteStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
@@ -139,6 +153,7 @@ app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use("/projects", express.static(PROJECTS_DIR)); // serves .../<projectId>/<kind>/<entityId>/image.png directly
 app.use("/book-projects", express.static(BOOK_PROJECTS_DIR)); // serves .../<projectId>/book-images/<imageId>.png
+app.use("/site-projects", express.static(SITE_PROJECTS_DIR)); // serves .../<projectId>/site-assets/<assetId>
 
 // Lets the frontend tell whether a local agent is running on this visitor's own machine
 // at all (see the health-check in App.jsx) — distinct from any real route, so it stays
@@ -1414,6 +1429,90 @@ app.get("/api/book-projects/:projectId/book/export", (req, res) => {
     `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
   );
   res.send(html);
+});
+
+// ==================== Site Builder ====================
+// Separate route namespace (/api/site-projects/...) and storage (siteStore.js) from
+// both studios above. The site JSON is opaque to the server — see siteStore.js.
+
+app.get("/api/site-projects", (_req, res) => {
+  res.json(listSiteProjects());
+});
+
+app.post("/api/site-projects", (req, res) => {
+  const { name, site } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  if (!site || typeof site !== "object") return res.status(400).json({ error: "site is required" });
+  res.json(createSiteProject(name, site));
+});
+
+app.delete("/api/site-projects/:id", (req, res) => {
+  deleteSiteProject(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post("/api/site-projects/:id/open-folder", (req, res) => {
+  const dir = path.resolve(path.join(SITE_PROJECTS_DIR, req.params.id));
+  if (!dir.startsWith(path.resolve(SITE_PROJECTS_DIR) + path.sep)) {
+    return res.status(400).json({ error: "invalid project id" });
+  }
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: "project not found" });
+
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+  execFile(opener, [dir], (err) => {
+    if (err) console.error(`open-folder: failed to launch ${opener}:`, err.message);
+  });
+  res.json({ ok: true, path: dir });
+});
+
+app.get("/api/site-projects/:projectId/site", (req, res) => {
+  if (!getSiteProject(req.params.projectId)) return res.status(404).json({ error: "project not found" });
+  res.json(getSite(req.params.projectId));
+});
+
+// Whole-document replace — the editor autosaves its full state on a short debounce
+// rather than sending per-field patches, since one drag can touch several rows at once.
+app.put("/api/site-projects/:projectId/site", (req, res) => {
+  if (!getSiteProject(req.params.projectId)) return res.status(404).json({ error: "project not found" });
+  if (!req.body || !Array.isArray(req.body.rows)) return res.status(400).json({ error: "invalid site" });
+  res.json(saveSite(req.params.projectId, req.body));
+});
+
+const SITE_ASSET_TYPES = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/svg+xml": "svg",
+};
+
+// Big photos are scaled down on the way in (never up) — the export embeds every image
+// as a data URI in one HTML file, so a few raw 12-megapixel phone photos would
+// otherwise make it tens of MB. 1440px covers a 720px-wide page at 2x. GIF/SVG are
+// stored untouched so animation/vector data survives.
+const SITE_ASSET_MAX_WIDTH = 1440;
+
+app.post("/api/site-projects/:projectId/assets", upload.single("file"), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    if (!getSiteProject(projectId)) return res.status(404).json({ error: "project not found" });
+    if (!req.file) return res.status(400).json({ error: "file is required" });
+    const ext = SITE_ASSET_TYPES[req.file.mimetype];
+    if (!ext) return res.status(400).json({ error: "only PNG, JPEG, WebP, GIF or SVG images are supported" });
+
+    let buffer = req.file.buffer;
+    if (ext === "png" || ext === "jpg" || ext === "webp") {
+      const meta = await sharp(buffer).metadata();
+      if (meta.width > SITE_ASSET_MAX_WIDTH) {
+        const resized = sharp(buffer).rotate().resize({ width: SITE_ASSET_MAX_WIDTH, withoutEnlargement: true });
+        buffer = await (ext === "png" ? resized.png() : ext === "jpg" ? resized.jpeg({ quality: 86 }) : resized.webp({ quality: 86 })).toBuffer();
+      }
+    }
+    res.json(saveSiteAsset(projectId, buffer, ext));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const PORT = process.env.PORT || 8787;
