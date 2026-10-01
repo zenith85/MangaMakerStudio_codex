@@ -11,6 +11,7 @@ const LANGUAGES = [
 const ILLUSTRATION_STYLES = [
   { value: "bw_illustration", label: "Black & white ink illustration" },
   { value: "color_illustration", label: "Full-color painterly illustration" },
+  { value: "realistic", label: "Realistic (photo-real)" },
 ];
 
 // A chapter's paragraphs (see bookPrompt.js's CONTENT_SCHEMA_DESCRIPTION: [{type,text}])

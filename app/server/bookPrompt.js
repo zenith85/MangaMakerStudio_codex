@@ -77,6 +77,10 @@ const ILLUSTRATION_STYLE_SUFFIX = {
   color_illustration:
     "Render as a full-color painterly editorial illustration — cinematic single scene, moody lighting, rich " +
     "brushwork, literary book-illustration style. No text, no lettering, no panel borders.",
+  realistic:
+    "Render as a photorealistic photograph — cinematic single scene, natural moody lighting, real textures and " +
+    "materials, like a still frame from a live-action film. No text, no lettering, no panel borders, no " +
+    "illustrative linework or stylization of any kind.",
 };
 
 // imagePrompt is the user's own override (see BookApp.jsx's Cover card — a manual

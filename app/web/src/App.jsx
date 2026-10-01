@@ -363,6 +363,7 @@ const STYLE_PRESETS = [
   { value: "manga_simple", label: "Manga (B&W, simple/clean)" },
   { value: "manhwa_color", label: "Manhwa (color)" },
   { value: "novel_illustration", label: "Novel illustration" },
+  { value: "realistic", label: "Realistic (photo-real)" },
 ];
 
 const ENTITY_KINDS = [

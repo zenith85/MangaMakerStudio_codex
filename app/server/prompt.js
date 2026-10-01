@@ -6,6 +6,10 @@ const STYLE_SUFFIX = {
     "plain uncluttered backgrounds — an everyday simple-manga look, not a highly detailed or textured one.",
   manhwa_color: "Render as a full-color manhwa/webtoon panel with soft cel shading.",
   novel_illustration: "Render as a full-bleed painterly light-novel illustration.",
+  realistic:
+    "Render as a photorealistic scene, like a still frame from a live-action film or a real photograph — " +
+    "natural lighting, real textures and materials, accurate anatomy and proportions. No linework, no " +
+    "cel-shading, no screentone, no manga/anime/illustration stylization of any kind.",
 };
 
 function describeFields(fields) {

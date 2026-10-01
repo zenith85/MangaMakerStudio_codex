@@ -1294,7 +1294,7 @@ app.get("/api/book-projects/:projectId/book/content-prompt", (req, res) => {
   res.json({ prompt });
 });
 
-const BOOK_ILLUSTRATION_STYLES = new Set(["bw_illustration", "color_illustration"]);
+const BOOK_ILLUSTRATION_STYLES = new Set(["bw_illustration", "color_illustration", "realistic"]);
 
 app.post("/api/book-projects/:projectId/book/cover/generate", async (req, res) => {
   try {
