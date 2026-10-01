@@ -75,8 +75,24 @@ export function runInProjectTerminal(projectId, command) {
   // own chat UI only submits on \r; (2) \r bundled into the same write() call as the
   // text gets treated as pasted content (no submit-on-Enter for pastes) rather than a
   // real keystroke - it must be a genuinely separate write, after the text has landed.
-  session.term.write(command);
-  setTimeout(() => session.term.write("\r"), 50);
+  // (3) a fixed 50ms wasn't always enough: with a long prompt (e.g. several #characters'
+  // descriptions), Codex was still ingesting the paste when \r arrived, so the Enter
+  // got folded into the pasted text and the prompt just sat unsent in the input box
+  // until the caller timed out. Wrapping the text in bracketed-paste markers tells the
+  // receiver exactly where the paste ends, so the \r after it is always a real keypress.
+  // Bash's readline binds these markers even with enable-bracketed-paste off, so a plain
+  // shell prompt handles them too. PowerShell gets the old unwrapped write.
+  if (process.platform === "win32") {
+    session.term.write(command);
+  } else {
+    session.term.write(`\x1b[200~${command}\x1b[201~`);
+  }
+  // Scaled to the prompt's length as a second safety margin, then Enter once more a bit
+  // later in case the first landed too early anyway — a stray extra Enter is harmless
+  // both in Codex's chat (empty input box, nothing to submit) and at a shell prompt.
+  const delay = 150 + Math.min(1500, Math.round(command.length / 10));
+  setTimeout(() => session.term.write("\r"), delay);
+  setTimeout(() => session.term.write("\r"), delay + 2000);
 }
 
 // Sends Ctrl+C into the given project's terminal session, to stop a `codex exec` that
