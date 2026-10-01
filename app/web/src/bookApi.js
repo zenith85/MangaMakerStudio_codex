@@ -1,4 +1,4 @@
-// Ibraheem HTML Studio's own API client — a separate module from api.js (Manga
+// HTML Shorts Maker's own API client — a separate module from api.js (Manga
 // Studio's), hitting a separate route namespace (/api/book-projects/...) on the same
 // local backend. Kept apart so nothing here ever needs api.js to change.
 const BASE = "http://localhost:8787/api";

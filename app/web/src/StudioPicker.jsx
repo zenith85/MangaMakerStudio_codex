@@ -22,7 +22,7 @@ export default function StudioPicker({ onPick }) {
         </button>
         <button className="studio-card" onClick={() => onPick("html")}>
           <span className="studio-card-icon">📰</span>
-          <span className="studio-card-name">Ibraheem HTML Studio</span>
+          <span className="studio-card-name">HTML Shorts Maker</span>
           <span className="studio-card-desc">
             Curate an illustrated, condensed "10-minute read" of a book as one self-contained HTML file.
           </span>

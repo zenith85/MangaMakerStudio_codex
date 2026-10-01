@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Terminal from "./Terminal";
 
-// Used by Ibraheem HTML Studio (BookApp.jsx / StudioPicker.jsx) only. These are
+// Used by HTML Shorts Maker (BookApp.jsx / StudioPicker.jsx) only. These are
 // deliberate COPIES of the equivalent bits already living inside App.jsx (Manga
 // Studio) — not imports from it and not extracted out of it — specifically so Manga
 // Studio's file never has to be touched to build or change this studio.

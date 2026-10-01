@@ -1,4 +1,4 @@
-// Prompt builders for Ibraheem HTML Studio — a condensed, illustrated "10-minute read"
+// Prompt builders for HTML Shorts Maker — a condensed, illustrated "10-minute read"
 // of a book, rendered as one self-contained HTML file (see bookTemplate.js). Two kinds
 // of Codex call feed it: one text-curation call that writes the whole structured book
 // content as JSON (buildBookContentPrompt), and one image_gen call per illustration

@@ -1,4 +1,4 @@
-// Renders an Ibraheem HTML Studio book (title/author/chapters/images — see
+// Renders an HTML Shorts Maker book (title/author/chapters/images — see
 // bookPrompt.js's CONTENT_SCHEMA_DESCRIPTION for the exact shape `content` must match)
 // into ONE self-contained HTML file: no external requests, no build step — images are
 // inlined as base64 data URIs and the whole reader (pagination engine + styles) lives in

@@ -44,7 +44,7 @@ import { buildPrompt, buildEntityPrompt, buildEditPrompt } from "./prompt.js";
 import { applyImageFilter } from "./imageFilters.js";
 import { composePageThumbnail } from "./pageThumbnail.js";
 import { parseSceneDoc, EMPTY_SCENE_DOC } from "./scene.js";
-// Ibraheem HTML Studio — a fully separate feature bolted on beneath, with its own
+// HTML Shorts Maker — a fully separate feature bolted on beneath, with its own
 // storage (bookStore.js, a sibling book-projects/ tree, never Manga Studio's projects/)
 // and its own Codex text-curation call (bookCodex.js). It reuses generateImageViaCodex
 // from codex.js as-is (imported above), since illustration generation is identical
@@ -1138,7 +1138,7 @@ app.post("/api/projects/:projectId/pages/:pageId/panels/:panelId/edit", async (r
   }
 });
 
-// ==================== Ibraheem HTML Studio ====================
+// ==================== HTML Shorts Maker ====================
 // Entirely separate route namespace (/api/book-projects/...) and storage
 // (bookStore.js's book-projects/ tree) from everything above — no shared state with
 // Manga Studio's /api/projects routes beyond the same Express app and the same

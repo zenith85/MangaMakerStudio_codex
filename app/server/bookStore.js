@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Ibraheem HTML Studio's own storage — deliberately a SEPARATE tree
+// HTML Shorts Maker's own storage — deliberately a SEPARATE tree
 // (book-projects/, not projects/) and a separate module from store.js, so nothing here
 // ever touches Manga Studio's project folders or code path. A book project has no
 // characters/pages/panels — just book.json (title/author/language plus the

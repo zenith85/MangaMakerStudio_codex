@@ -333,7 +333,7 @@ export default function BookApp({ onBackToStudios }) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-header-top">
-            <span className="app-name">Ibraheem HTML Studio</span>
+            <span className="app-name">HTML Shorts Maker</span>
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
           </div>
           <button className="back-link" onClick={() => setCurrentProjectId(null)}>
@@ -516,7 +516,7 @@ function BookLanding({ books, onOpen, onCreate, onDelete, onImport, importBusy, 
           <button className="back-link" onClick={onBackToStudios}>
             ← Studios
           </button>
-          <h1>Ibraheem HTML Studio</h1>
+          <h1>HTML Shorts Maker</h1>
         </div>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </div>

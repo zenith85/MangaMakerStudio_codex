@@ -38,7 +38,7 @@ export function parseBookHtml(html) {
   const $ = cheerio.load(html);
   const source = $("#source");
   if (!source.length) {
-    throw new Error("This doesn't look like an Ibraheem HTML Studio export (no book content found in the file).");
+    throw new Error("This doesn't look like an HTML Shorts Maker export (no book content found in the file).");
   }
 
   const one = (selector) => {
@@ -99,7 +99,7 @@ export function parseBookHtml(html) {
   closing.sections = closingSections;
 
   if (!chapters.length) {
-    throw new Error("This file has no chapters — it may not be an Ibraheem HTML Studio export.");
+    throw new Error("This file has no chapters — it may not be an HTML Shorts Maker export.");
   }
 
   const content = {

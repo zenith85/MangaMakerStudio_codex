@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECTS_DIR = path.join(__dirname, "projects");
-// Ibraheem HTML Studio's book projects live in a separate tree (see bookStore.js) —
+// HTML Shorts Maker's book projects live in a separate tree (see bookStore.js) —
 // checked as a fallback below so its book projects' terminal sessions cwd into their
 // own folder too, without this file needing to know anything else about that studio.
 const BOOK_PROJECTS_DIR = path.join(__dirname, "book-projects");

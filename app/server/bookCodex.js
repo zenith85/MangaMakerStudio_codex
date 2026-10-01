@@ -7,7 +7,7 @@ import { bookProjectDirForCodex } from "./bookStore.js";
 
 // Same shellQuote/poll-for-output-file approach as codex.js's own functions (kept as a
 // separate copy here, not imported, so nothing in codex.js — Manga Studio's file — ever
-// needs to change to support Ibraheem HTML Studio).
+// needs to change to support HTML Shorts Maker).
 function shellQuote(value) {
   const str = String(value);
   if (process.platform === "win32") {
@@ -23,7 +23,7 @@ function sleep(ms) {
 const CODEX_TIMEOUT_MS = 8 * 60 * 1000;
 const POLL_INTERVAL_MS = 2000;
 
-// Curates the full text content of an Ibraheem HTML Studio book (see bookPrompt.js for
+// Curates the full text content of an HTML Shorts Maker book (see bookPrompt.js for
 // the exact JSON shape) via Codex CLI, in the project's own shared terminal session
 // (same mechanism as codex.js's generateImageViaCodex/translateTextsViaCodex) so it's
 // visible there too. `prompt` is already fully built (see buildBookContentPrompt).
