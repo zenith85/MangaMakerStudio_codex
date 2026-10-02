@@ -499,6 +499,15 @@
   margin: 0;
 }
 
+.site-inspector-header-links {
+  display: flex;
+  gap: 2px;
+}
+
+.site-inspector-header-links .back-link {
+  color: #4a5cff;
+}
+
 .site-field {
   display: flex;
   flex-direction: column;

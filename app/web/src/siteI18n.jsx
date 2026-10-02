@@ -94,6 +94,8 @@ const KO = {
   "Page settings": "페이지 설정",
   "Click any row or element on the page to edit it.": "페이지의 행이나 요소를 클릭하면 편집할 수 있습니다.",
   "Back to page settings (Esc)": "페이지 설정으로 돌아가기 (Esc)",
+  "Row settings": "행 설정",
+  "Edit the row this element is in (background, padding, columns)": "이 요소가 들어 있는 행 편집 (배경, 여백, 열)",
   "Page title (browser tab)": "페이지 제목 (브라우저 탭)",
   "Language code": "언어 코드",
   "ko, en, ja…": "ko, en, ja…",

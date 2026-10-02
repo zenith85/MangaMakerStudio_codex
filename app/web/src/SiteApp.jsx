@@ -759,6 +759,7 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
                   }}
                 >
                   <RowToolbar
+                    onSelect={() => setSelection({ kind: "row", id: row.id })}
                     row={row}
                     index={rowIndex}
                     count={site.rows.length}
@@ -837,7 +838,14 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
             {error}
           </p>
         )}
-        <Inspector site={site} selection={selection} commit={commit} uploadFiles={uploadFiles} onDeselect={() => setSelection(null)} />
+        <Inspector
+          site={site}
+          selection={selection}
+          commit={commit}
+          uploadFiles={uploadFiles}
+          onDeselect={() => setSelection(null)}
+          onSelectRow={(id) => setSelection({ kind: "row", id })}
+        />
       </aside>
 
       {showPreview && <PreviewModal site={site} onClose={() => setShowPreview(false)} />}
@@ -845,9 +853,16 @@ function SiteEditor({ projectId, projectName, theme, onToggleTheme, onExit }) {
   );
 }
 
-function RowToolbar({ row, index, count, onDragStart, onDragEnd, onLayout, onMove, onDuplicate, onDelete }) {
+// Clicking the toolbar (its "⠿ Row" handle or background) selects its row — the only
+// way to reach a row whose content covers it edge to edge (e.g. a full-bleed image with
+// zero padding), where every click on the row itself lands on an element. Its buttons
+// and layout dropdown are left alone: duplicate/delete manage the selection themselves.
+function RowToolbar({ row, index, count, onSelect, onDragStart, onDragEnd, onLayout, onMove, onDuplicate, onDelete }) {
   const t = useT();
-  const stop = (e) => e.stopPropagation();
+  const stop = (e) => {
+    e.stopPropagation();
+    if (!e.target.closest("button, select")) onSelect();
+  };
   return (
     <div className="sbe sbe-row-tools" onClick={stop}>
       <span className="sbe-handle" draggable onDragStart={onDragStart} onDragEnd={onDragEnd} title={t("Drag to move row")}>
@@ -941,10 +956,19 @@ function PreviewModal({ site, onClose }) {
 
 // ---------- Inspector ----------
 
-function Inspector({ site, selection, commit, uploadFiles, onDeselect }) {
+function Inspector({ site, selection, commit, uploadFiles, onDeselect, onSelectRow }) {
   if (selection?.kind === "element") {
     const loc = locateElement(site, selection.id);
-    if (loc) return <ElementInspector el={loc.el} commit={commit} uploadFiles={uploadFiles} onDeselect={onDeselect} />;
+    if (loc)
+      return (
+        <ElementInspector
+          el={loc.el}
+          commit={commit}
+          uploadFiles={uploadFiles}
+          onDeselect={onDeselect}
+          onSelectRow={() => onSelectRow(loc.row.id)}
+        />
+      );
   }
   if (selection?.kind === "row") {
     const row = site.rows.find((r) => r.id === selection.id);
@@ -1058,13 +1082,13 @@ function RowInspector({ row, commit, onDeselect }) {
   );
 }
 
-function ElementInspector({ el, commit, uploadFiles, onDeselect }) {
+function ElementInspector({ el, commit, uploadFiles, onDeselect, onSelectRow }) {
   const update = (patch, key) => commit((s) => Object.assign(locateElement(s, el.id)?.el || {}, patch), key);
   const set = (key) => (value) => update({ [key]: value }, `${el.id}:${key}`);
 
   return (
     <div className="site-inspector-body">
-      <InspectorHeader title={typeLabel(el.type)} onBack={onDeselect} />
+      <InspectorHeader title={typeLabel(el.type)} onBack={onDeselect} onSelectRow={onSelectRow} />
 
       {["heading", "text", "badge", "quote", "button"].includes(el.type) && (
         <Field label="Text">
@@ -1312,14 +1336,23 @@ function BoxFields({ el, set, update }) {
 // Captions passed to InspectorHeader and the field components below are English
 // strings that these components translate themselves (see siteI18n.jsx), so call
 // sites just write label="Corner radius" etc.
-function InspectorHeader({ title, onBack }) {
+// onSelectRow (elements only): jump to the row holding this element — its background,
+// padding, border and columns live there, not on the element.
+function InspectorHeader({ title, onBack, onSelectRow }) {
   const t = useT();
   return (
     <div className="site-inspector-header">
       <h4>{t(title)}</h4>
-      <button className="back-link" onClick={onBack} title={t("Back to page settings (Esc)")}>
-        {t("Page settings")}
-      </button>
+      <span className="site-inspector-header-links">
+        {onSelectRow && (
+          <button className="back-link" onClick={onSelectRow} title={t("Edit the row this element is in (background, padding, columns)")}>
+            {t("Row settings")}
+          </button>
+        )}
+        <button className="back-link" onClick={onBack} title={t("Back to page settings (Esc)")}>
+          {t("Page settings")}
+        </button>
+      </span>
     </div>
   );
 }
