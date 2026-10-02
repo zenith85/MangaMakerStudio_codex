@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { siteApi } from "./siteApi";
 import { useTheme, ThemeToggle, useAgentStatus, DownloadPrompt } from "./Shared";
 import {
@@ -160,17 +160,28 @@ function SiteLanding({ sites, onOpen, onCreate, onDelete, theme, onToggleTheme, 
       {showForm && (
         <form className="site-new-form" onSubmit={submit}>
           <input placeholder={t("Site name")} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <div className="site-template-grid">
+          <div className="site-template-grid" role="radiogroup">
             {SITE_TEMPLATES.map((tpl) => (
-              <button
-                type="button"
+              // A div acting as a radio option rather than a <button>: the card holds a
+              // preview iframe, which isn't allowed inside a button.
+              <div
+                role="radio"
+                aria-checked={templateId === tpl.id}
+                tabIndex={0}
                 key={tpl.id}
                 className={`site-template-card${templateId === tpl.id ? " active" : ""}`}
                 onClick={() => setTemplateId(tpl.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTemplateId(tpl.id);
+                  }
+                }}
               >
+                <TemplateThumb template={tpl} />
                 <strong>{t(tpl.label)}</strong>
                 <span>{t(tpl.desc)}</span>
-              </button>
+              </div>
             ))}
           </div>
           <button type="submit" className="primary" disabled={busy || !name.trim()}>
@@ -180,6 +191,18 @@ function SiteLanding({ sites, onOpen, onCreate, onDelete, theme, onToggleTheme, 
         </form>
       )}
     </div>
+  );
+}
+
+// A live, scaled-down render of a template — the same renderSiteHtml the export uses,
+// in an inert iframe (no pointer events, not focusable) so each card shows what that
+// style actually looks like. Built once per template.
+function TemplateThumb({ template }) {
+  const html = useMemo(() => renderSiteHtml(template.build("Preview")), [template]);
+  return (
+    <span className="site-template-thumb" aria-hidden="true">
+      <iframe title={template.label} srcDoc={html} tabIndex={-1} loading="lazy" />
+    </span>
   );
 }
 

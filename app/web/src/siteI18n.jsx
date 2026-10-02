@@ -18,9 +18,24 @@ const KO = {
   'Delete "{name}" and everything in it? This can\'t be undone.': '"{name}"과(와) 그 안의 모든 내용을 삭제할까요? 되돌릴 수 없습니다.',
   "Blank page": "빈 페이지",
   "Start from nothing and drag in rows.": "빈 페이지에서 시작해 행을 끌어다 놓으세요.",
-  "Book collection": "도서 컬렉션",
-  "Hero image, theme cards, a shelf of covers and a closing note — like a PageBox collection page.":
-    "대표 이미지, 테마 카드, 표지 책장, 마무리 문구 — PageBox 컬렉션 페이지 구성입니다.",
+  "Mint Compass": "민트 컴퍼스",
+  "Collection guide — hero, “where to start” theme cards, a shelf of covers and a closing note.":
+    "컬렉션 가이드 — 대표 이미지, ‘어디서 시작할까’ 테마 카드, 표지 책장, 마무리 문구.",
+  "Midnight Library": "미드나잇 라이브러리",
+  "Author spotlight — navy and gold, an opening quote, featured books and the full shelf.":
+    "작가 스포트라이트 — 네이비와 골드, 여는 인용구, 추천 도서와 전체 책장.",
+  "Paper Lantern": "종이 등불",
+  "Seasonal reading event — dates, three easy steps, editor's picks and a festival shelf.":
+    "시즌 독서 이벤트 — 기간, 간단한 3단계 참여 방법, 에디터 추천, 이벤트 책장.",
+  "Neon Ranking": "네온 랭킹",
+  "Weekly bestseller chart — a ranked top 5 with covers, then the rest of the chart.":
+    "주간 베스트셀러 차트 — 표지와 함께 보는 TOP 5, 이어지는 나머지 순위.",
+  "Sunday Brunch": "선데이 브런치",
+  "Soft short-read curation — a pull quote, cozy picks side by side, pastel tones.":
+    "부드러운 짧은 글 큐레이션 — 인용구, 나란히 놓인 추천작, 파스텔 톤.",
+  "Front Page": "프론트 페이지",
+  "Editorial review — a newspaper front page with a cover story and reviewed books.":
+    "에디토리얼 리뷰 — 커버 스토리와 리뷰 도서로 구성한 신문 1면 스타일.",
   "Checking for local agent…": "로컬 에이전트 확인 중…",
   "Loading site…": "사이트 불러오는 중…",
 
